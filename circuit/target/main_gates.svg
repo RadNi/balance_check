@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="238" onload="init(evt)" viewBox="0 0 1200 238" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = true;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="238" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">Artifact: ./target/balance_check.json, Function: main</text><text id="details" fill="rgb(0,0,0)" x="10" y="221.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="221.00"> </text><svg id="frames" x="10" width="1180" total_samples="1193522"><g><title>acir::blackbox::range (3,451 gates, 0.29%)</title><rect x="0.0000%" y="157" width="0.2891%" height="23" fill="rgb(255,241,241)" fg:x="0" fg:w="3451"/><text x="0.2500%" y="171.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="0.2891%" y="109" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="3451" fg:w="10"/><text x="0.5391%" y="123.50"></text></g><g><title>keccak256.nr:52:28::sliced as u64 (81 gates, 0.01%)</title><rect x="0.2891%" y="133" width="0.0068%" height="23" fill="rgb(255,248,248)" fg:x="3451" fg:w="81"/><text x="0.5391%" y="147.50"></text></g><g><title>acir::blackbox::range (71 gates, 0.01%)</title><rect x="0.2900%" y="109" width="0.0059%" height="23" fill="rgb(255,248,248)" fg:x="3461" fg:w="71"/><text x="0.5400%" y="123.50"></text></g><g><title>keccak256.nr:79:17::keccakf1600(state) (17,157 gates, 1.44%)</title><rect x="0.2959%" y="133" width="1.4375%" height="23" fill="rgb(255,232,232)" fg:x="3532" fg:w="17157"/><text x="0.5459%" y="147.50"></text></g><g><title>mod.nr:23:9::super::keccakf1600(input) (17,157 gates, 1.44%)</title><rect x="0.2959%" y="109" width="1.4375%" height="23" fill="rgb(255,232,232)" fg:x="3532" fg:w="17157"/><text x="0.5459%" y="123.50"></text></g><g><title>acir::blackbox::keccakf1600 (17,157 gates, 1.44%)</title><rect x="0.2959%" y="85" width="1.4375%" height="23" fill="rgb(255,232,232)" fg:x="3532" fg:w="17157"/><text x="0.5459%" y="99.50"></text></g><g><title>main.nr:126:23::keccak256::keccak256(account.address, 20) (17,278 gates, 1.45%)</title><rect x="0.2891%" y="157" width="1.4476%" height="23" fill="rgb(255,232,232)" fg:x="3451" fg:w="17278"/><text x="0.5391%" y="171.50"></text></g><g><title>keccak256.nr:94:32::lane.to_le_bytes (40 gates, 0.00%)</title><rect x="1.7334%" y="133" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="20689" fg:w="40"/><text x="1.9834%" y="147.50"></text></g><g><title>mod.nr:101:21::self.to_le_radix (40 gates, 0.00%)</title><rect x="1.7334%" y="109" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="20689" fg:w="40"/><text x="1.9834%" y="123.50"></text></g><g><title>mod.nr:165:9::__to_le_radix(self, radix) (40 gates, 0.00%)</title><rect x="1.7334%" y="85" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="20689" fg:w="40"/><text x="1.9834%" y="99.50"></text></g><g><title>acir::blackbox::range (40 gates, 0.00%)</title><rect x="1.7334%" y="61" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="20689" fg:w="40"/><text x="1.9834%" y="75.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="1.7368%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="20729" fg:w="5"/><text x="1.9868%" y="147.50"></text></g><g><title>main.nr:130:13::i &lt; node_length (19 gates, 0.00%)</title><rect x="1.7368%" y="157" width="0.0016%" height="23" fill="rgb(255,249,249)" fg:x="20729" fg:w="19"/><text x="1.9868%" y="171.50"></text></g><g><title>acir::blackbox::range (14 gates, 0.00%)</title><rect x="1.7372%" y="133" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="20734" fg:w="14"/><text x="1.9872%" y="147.50"></text></g><g><title>main.nr:131:16::nodes[i].node_type == 0 (10 gates, 0.00%)</title><rect x="1.7384%" y="157" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="20748" fg:w="10"/><text x="1.9884%" y="171.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="1.7384%" y="133" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="20748" fg:w="10"/><text x="1.9884%" y="147.50"></text></g><g><title>main.nr:26:12::node.row_exist[i] (5 gates, 0.00%)</title><rect x="1.7392%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="20758" fg:w="5"/><text x="1.9892%" y="147.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="1.7392%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="20758" fg:w="5"/><text x="1.9892%" y="123.50"></text></g><g><title>acir::arithmetic (370 gates, 0.03%)</title><rect x="1.7396%" y="109" width="0.0310%" height="23" fill="rgb(255,247,247)" fg:x="20763" fg:w="370"/><text x="1.9896%" y="123.50"></text></g><g><title>main.nr:27:16::len2 &gt; 255 - 33 (550 gates, 0.05%)</title><rect x="1.7396%" y="133" width="0.0461%" height="23" fill="rgb(255,246,246)" fg:x="20763" fg:w="550"/><text x="1.9896%" y="147.50"></text></g><g><title>acir::blackbox::range (180 gates, 0.02%)</title><rect x="1.7706%" y="109" width="0.0151%" height="23" fill="rgb(255,248,248)" fg:x="21133" fg:w="180"/><text x="2.0206%" y="123.50"></text></g><g><title>acir::arithmetic (490 gates, 0.04%)</title><rect x="1.7857%" y="109" width="0.0411%" height="23" fill="rgb(255,247,247)" fg:x="21313" fg:w="490"/><text x="2.0357%" y="123.50"></text></g><g><title>main.nr:28:17::len1 += 1 (567 gates, 0.05%)</title><rect x="1.7857%" y="133" width="0.0475%" height="23" fill="rgb(255,246,246)" fg:x="21313" fg:w="567"/><text x="2.0357%" y="147.50"></text></g><g><title>acir::blackbox::range (77 gates, 0.01%)</title><rect x="1.8268%" y="109" width="0.0065%" height="23" fill="rgb(255,248,248)" fg:x="21803" fg:w="77"/><text x="2.0768%" y="123.50"></text></g><g><title>acir::arithmetic (235 gates, 0.02%)</title><rect x="1.8332%" y="109" width="0.0197%" height="23" fill="rgb(255,247,247)" fg:x="21880" fg:w="235"/><text x="2.0832%" y="123.50"></text></g><g><title>main.nr:29:24::len2 - 223 (338 gates, 0.03%)</title><rect x="1.8332%" y="133" width="0.0283%" height="23" fill="rgb(255,247,247)" fg:x="21880" fg:w="338"/><text x="2.0832%" y="147.50"></text></g><g><title>acir::blackbox::range (103 gates, 0.01%)</title><rect x="1.8529%" y="109" width="0.0086%" height="23" fill="rgb(255,248,248)" fg:x="22115" fg:w="103"/><text x="2.1029%" y="123.50"></text></g><g><title>acir::arithmetic (525 gates, 0.04%)</title><rect x="1.8615%" y="109" width="0.0440%" height="23" fill="rgb(255,246,246)" fg:x="22218" fg:w="525"/><text x="2.1115%" y="123.50"></text></g><g><title>main.nr:31:17::len2 += 33 (609 gates, 0.05%)</title><rect x="1.8615%" y="133" width="0.0510%" height="23" fill="rgb(255,246,246)" fg:x="22218" fg:w="609"/><text x="2.1115%" y="147.50"></text></g><g><title>acir::blackbox::range (84 gates, 0.01%)</title><rect x="1.9055%" y="109" width="0.0070%" height="23" fill="rgb(255,248,248)" fg:x="22743" fg:w="84"/><text x="2.1555%" y="123.50"></text></g><g><title>main.nr:34:16::len2 == 255 (450 gates, 0.04%)</title><rect x="1.9126%" y="133" width="0.0377%" height="23" fill="rgb(255,247,247)" fg:x="22827" fg:w="450"/><text x="2.1626%" y="147.50"></text></g><g><title>acir::arithmetic (450 gates, 0.04%)</title><rect x="1.9126%" y="109" width="0.0377%" height="23" fill="rgb(255,247,247)" fg:x="22827" fg:w="450"/><text x="2.1626%" y="123.50"></text></g><g><title>main.nr:35:24::0 (150 gates, 0.01%)</title><rect x="1.9503%" y="133" width="0.0126%" height="23" fill="rgb(255,248,248)" fg:x="23277" fg:w="150"/><text x="2.2003%" y="147.50"></text></g><g><title>acir::arithmetic (150 gates, 0.01%)</title><rect x="1.9503%" y="109" width="0.0126%" height="23" fill="rgb(255,248,248)" fg:x="23277" fg:w="150"/><text x="2.2003%" y="123.50"></text></g><g><title>acir::arithmetic (420 gates, 0.04%)</title><rect x="1.9628%" y="109" width="0.0352%" height="23" fill="rgb(255,247,247)" fg:x="23427" fg:w="420"/><text x="2.2128%" y="123.50"></text></g><g><title>main.nr:36:17::len1 += 1 (518 gates, 0.04%)</title><rect x="1.9628%" y="133" width="0.0434%" height="23" fill="rgb(255,246,246)" fg:x="23427" fg:w="518"/><text x="2.2128%" y="147.50"></text></g><g><title>acir::blackbox::range (98 gates, 0.01%)</title><rect x="1.9980%" y="109" width="0.0082%" height="23" fill="rgb(255,248,248)" fg:x="23847" fg:w="98"/><text x="2.2480%" y="123.50"></text></g><g><title>acir::arithmetic (385 gates, 0.03%)</title><rect x="2.0062%" y="109" width="0.0323%" height="23" fill="rgb(255,247,247)" fg:x="23945" fg:w="385"/><text x="2.2562%" y="123.50"></text></g><g><title>main.nr:38:17::len2 += 1 (468 gates, 0.04%)</title><rect x="2.0062%" y="133" width="0.0392%" height="23" fill="rgb(255,247,247)" fg:x="23945" fg:w="468"/><text x="2.2562%" y="147.50"></text></g><g><title>acir::blackbox::range (83 gates, 0.01%)</title><rect x="2.0385%" y="109" width="0.0070%" height="23" fill="rgb(255,248,248)" fg:x="24330" fg:w="83"/><text x="2.2885%" y="123.50"></text></g><g><title>main.nr:42:8::len2 == 255 (25 gates, 0.00%)</title><rect x="2.0455%" y="133" width="0.0021%" height="23" fill="rgb(255,249,249)" fg:x="24413" fg:w="25"/><text x="2.2955%" y="147.50"></text></g><g><title>acir::arithmetic (25 gates, 0.00%)</title><rect x="2.0455%" y="109" width="0.0021%" height="23" fill="rgb(255,249,249)" fg:x="24413" fg:w="25"/><text x="2.2955%" y="123.50"></text></g><g><title>main.nr:43:16::0 (10 gates, 0.00%)</title><rect x="2.0476%" y="133" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="24438" fg:w="10"/><text x="2.2976%" y="147.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="2.0476%" y="109" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="24438" fg:w="10"/><text x="2.2976%" y="123.50"></text></g><g><title>acir::arithmetic (45 gates, 0.00%)</title><rect x="2.0484%" y="109" width="0.0038%" height="23" fill="rgb(255,249,249)" fg:x="24448" fg:w="45"/><text x="2.2984%" y="123.50"></text></g><g><title>main.nr:44:9::len1 += 1 (52 gates, 0.00%)</title><rect x="2.0484%" y="133" width="0.0044%" height="23" fill="rgb(255,249,249)" fg:x="24448" fg:w="52"/><text x="2.2984%" y="147.50"></text></g><g><title>acir::blackbox::range (7 gates, 0.00%)</title><rect x="2.0522%" y="109" width="0.0006%" height="23" fill="rgb(255,249,249)" fg:x="24493" fg:w="7"/><text x="2.3022%" y="123.50"></text></g><g><title>acir::arithmetic (35 gates, 0.00%)</title><rect x="2.0527%" y="109" width="0.0029%" height="23" fill="rgb(255,249,249)" fg:x="24500" fg:w="35"/><text x="2.3027%" y="123.50"></text></g><g><title>main.nr:46:9::len2 += 1 (40 gates, 0.00%)</title><rect x="2.0527%" y="133" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="24500" fg:w="40"/><text x="2.3027%" y="147.50"></text></g><g><title>acir::blackbox::range (5 gates, 0.00%)</title><rect x="2.0557%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24535" fg:w="5"/><text x="2.3057%" y="123.50"></text></g><g><title>acir::arithmetic (15 gates, 0.00%)</title><rect x="2.0561%" y="109" width="0.0013%" height="23" fill="rgb(255,249,249)" fg:x="24540" fg:w="15"/><text x="2.3061%" y="123.50"></text></g><g><title>main.nr:48:23::len2 &lt;= 55 (27 gates, 0.00%)</title><rect x="2.0561%" y="133" width="0.0023%" height="23" fill="rgb(255,249,249)" fg:x="24540" fg:w="27"/><text x="2.3061%" y="147.50"></text></g><g><title>acir::blackbox::range (12 gates, 0.00%)</title><rect x="2.0574%" y="109" width="0.0010%" height="23" fill="rgb(255,249,249)" fg:x="24555" fg:w="12"/><text x="2.3074%" y="123.50"></text></g><g><title>main.nr:48:8::(len1 == 0) &amp; (len2 &lt;= 55) (5 gates, 0.00%)</title><rect x="2.0584%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24567" fg:w="5"/><text x="2.3084%" y="147.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="2.0584%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24567" fg:w="5"/><text x="2.3084%" y="123.50"></text></g><g><title>main.nr:48:9::len1 == 0 (25 gates, 0.00%)</title><rect x="2.0588%" y="133" width="0.0021%" height="23" fill="rgb(255,249,249)" fg:x="24572" fg:w="25"/><text x="2.3088%" y="147.50"></text></g><g><title>acir::arithmetic (25 gates, 0.00%)</title><rect x="2.0588%" y="109" width="0.0021%" height="23" fill="rgb(255,249,249)" fg:x="24572" fg:w="25"/><text x="2.3088%" y="123.50"></text></g><g><title>acir::arithmetic (40 gates, 0.00%)</title><rect x="2.0609%" y="109" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="24597" fg:w="40"/><text x="2.3109%" y="123.50"></text></g><g><title>main.nr:49:26::0xc0 + len2 (46 gates, 0.00%)</title><rect x="2.0609%" y="133" width="0.0039%" height="23" fill="rgb(255,249,249)" fg:x="24597" fg:w="46"/><text x="2.3109%" y="147.50"></text></g><g><title>acir::blackbox::range (6 gates, 0.00%)</title><rect x="2.0642%" y="109" width="0.0005%" height="23" fill="rgb(255,249,249)" fg:x="24637" fg:w="6"/><text x="2.3142%" y="123.50"></text></g><g><title>main.nr:51:15::len1 == 0 (5 gates, 0.00%)</title><rect x="2.0647%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24643" fg:w="5"/><text x="2.3147%" y="147.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="2.0647%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24643" fg:w="5"/><text x="2.3147%" y="123.50"></text></g><g><title>main.nr:62:9::index += 1 (5 gates, 0.00%)</title><rect x="2.0651%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24648" fg:w="5"/><text x="2.3151%" y="147.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="2.0651%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="24648" fg:w="5"/><text x="2.3151%" y="123.50"></text></g><g><title>acir::arithmetic (251 gates, 0.02%)</title><rect x="2.0656%" y="109" width="0.0210%" height="23" fill="rgb(255,247,247)" fg:x="24653" fg:w="251"/><text x="2.3156%" y="123.50"></text></g><g><title>acir::memory::init (482 gates, 0.04%)</title><rect x="2.0866%" y="109" width="0.0404%" height="23" fill="rgb(255,247,247)" fg:x="24904" fg:w="482"/><text x="2.3366%" y="123.50"></text></g><g><title>main.nr:67:13::encoded[index] (1,697 gates, 0.14%)</title><rect x="2.0656%" y="133" width="0.1422%" height="23" fill="rgb(255,244,244)" fg:x="24653" fg:w="1697"/><text x="2.3156%" y="147.50"></text></g><g><title>acir::memory::op (964 gates, 0.08%)</title><rect x="2.1270%" y="109" width="0.0808%" height="23" fill="rgb(255,245,245)" fg:x="25386" fg:w="964"/><text x="2.3770%" y="123.50"></text></g><g><title>acir::arithmetic (320 gates, 0.03%)</title><rect x="2.2078%" y="109" width="0.0268%" height="23" fill="rgb(255,247,247)" fg:x="26350" fg:w="320"/><text x="2.4578%" y="123.50"></text></g><g><title>main.nr:67:30::0xa0 (544 gates, 0.05%)</title><rect x="2.2078%" y="133" width="0.0456%" height="23" fill="rgb(255,246,246)" fg:x="26350" fg:w="544"/><text x="2.4578%" y="147.50"></text></g><g><title>acir::blackbox::range (224 gates, 0.02%)</title><rect x="2.2346%" y="109" width="0.0188%" height="23" fill="rgb(255,247,247)" fg:x="26670" fg:w="224"/><text x="2.4846%" y="123.50"></text></g><g><title>acir::arithmetic (160 gates, 0.01%)</title><rect x="2.2533%" y="109" width="0.0134%" height="23" fill="rgb(255,248,248)" fg:x="26894" fg:w="160"/><text x="2.5033%" y="123.50"></text></g><g><title>main.nr:68:13::index += 1 (288 gates, 0.02%)</title><rect x="2.2533%" y="133" width="0.0241%" height="23" fill="rgb(255,247,247)" fg:x="26894" fg:w="288"/><text x="2.5033%" y="147.50"></text></g><g><title>acir::blackbox::range (128 gates, 0.01%)</title><rect x="2.2667%" y="109" width="0.0107%" height="23" fill="rgb(255,248,248)" fg:x="27054" fg:w="128"/><text x="2.5167%" y="123.50"></text></g><g><title>acir::arithmetic (3,096 gates, 0.26%)</title><rect x="2.2775%" y="109" width="0.2594%" height="23" fill="rgb(255,242,242)" fg:x="27182" fg:w="3096"/><text x="2.5275%" y="123.50"></text></g><g><title>main.nr:70:17::encoded[index] (290,368 gates, 24.33%)</title><rect x="2.2775%" y="133" width="24.3287%" height="23" fill="rgb(255,176,176)" fg:x="27182" fg:w="290368"/><text x="2.5275%" y="147.50">main.nr:70:17::encoded[index]</text></g><g><title>acir::memory::op (287,272 gates, 24.07%)</title><rect x="2.5369%" y="109" width="24.0693%" height="23" fill="rgb(255,176,176)" fg:x="30278" fg:w="287272"/><text x="2.7869%" y="123.50">acir::memory::op</text></g><g><title>acir::arithmetic (5,120 gates, 0.43%)</title><rect x="26.6061%" y="109" width="0.4290%" height="23" fill="rgb(255,240,240)" fg:x="317550" fg:w="5120"/><text x="26.8561%" y="123.50"></text></g><g><title>main.nr:70:34::node.rows[i][j] (12,288 gates, 1.03%)</title><rect x="26.6061%" y="133" width="1.0296%" height="23" fill="rgb(255,234,234)" fg:x="317550" fg:w="12288"/><text x="26.8561%" y="147.50"></text></g><g><title>acir::blackbox::range (7,168 gates, 0.60%)</title><rect x="27.0351%" y="109" width="0.6006%" height="23" fill="rgb(255,238,238)" fg:x="322670" fg:w="7168"/><text x="27.2851%" y="123.50"></text></g><g><title>acir::arithmetic (2,715 gates, 0.23%)</title><rect x="27.6357%" y="109" width="0.2275%" height="23" fill="rgb(255,242,242)" fg:x="329838" fg:w="2715"/><text x="27.8857%" y="123.50"></text></g><g><title>main.nr:71:17::index += 1 (7,067 gates, 0.59%)</title><rect x="27.6357%" y="133" width="0.5921%" height="23" fill="rgb(255,238,238)" fg:x="329838" fg:w="7067"/><text x="27.8857%" y="147.50"></text></g><g><title>acir::blackbox::range (4,352 gates, 0.36%)</title><rect x="27.8632%" y="109" width="0.3646%" height="23" fill="rgb(255,241,241)" fg:x="332553" fg:w="4352"/><text x="28.1132%" y="123.50"></text></g><g><title>acir::arithmetic (2,885 gates, 0.24%)</title><rect x="28.2278%" y="109" width="0.2417%" height="23" fill="rgb(255,242,242)" fg:x="336905" fg:w="2885"/><text x="28.4778%" y="123.50"></text></g><g><title>acir::memory::init (480 gates, 0.04%)</title><rect x="28.4695%" y="109" width="0.0402%" height="23" fill="rgb(255,247,247)" fg:x="339790" fg:w="480"/><text x="28.7195%" y="123.50"></text></g><g><title>main.nr:74:13::encoded[index] (259,685 gates, 21.76%)</title><rect x="28.2278%" y="133" width="21.7579%" height="23" fill="rgb(255,180,180)" fg:x="336905" fg:w="259685"/><text x="28.4778%" y="147.50">main.nr:74:13::encoded[index]</text></g><g><title>acir::memory::op (256,320 gates, 21.48%)</title><rect x="28.5097%" y="109" width="21.4759%" height="23" fill="rgb(255,180,180)" fg:x="340270" fg:w="256320"/><text x="28.7597%" y="123.50">acir::memory::op</text></g><g><title>acir::arithmetic (250 gates, 0.02%)</title><rect x="49.9857%" y="109" width="0.0209%" height="23" fill="rgb(255,247,247)" fg:x="596590" fg:w="250"/><text x="50.2357%" y="123.50"></text></g><g><title>main.nr:74:30::0x80 (474 gates, 0.04%)</title><rect x="49.9857%" y="133" width="0.0397%" height="23" fill="rgb(255,247,247)" fg:x="596590" fg:w="474"/><text x="50.2357%" y="147.50"></text></g><g><title>acir::blackbox::range (224 gates, 0.02%)</title><rect x="50.0066%" y="109" width="0.0188%" height="23" fill="rgb(255,247,247)" fg:x="596840" fg:w="224"/><text x="50.2566%" y="123.50"></text></g><g><title>acir::arithmetic (315 gates, 0.03%)</title><rect x="50.0254%" y="109" width="0.0264%" height="23" fill="rgb(255,247,247)" fg:x="597064" fg:w="315"/><text x="50.2754%" y="123.50"></text></g><g><title>main.nr:75:13::index += 1 (459 gates, 0.04%)</title><rect x="50.0254%" y="133" width="0.0385%" height="23" fill="rgb(255,247,247)" fg:x="597064" fg:w="459"/><text x="50.2754%" y="147.50"></text></g><g><title>acir::blackbox::range (144 gates, 0.01%)</title><rect x="50.0518%" y="109" width="0.0121%" height="23" fill="rgb(255,248,248)" fg:x="597379" fg:w="144"/><text x="50.3018%" y="123.50"></text></g><g><title>acir::arithmetic (20 gates, 0.00%)</title><rect x="50.0638%" y="109" width="0.0017%" height="23" fill="rgb(255,249,249)" fg:x="597523" fg:w="20"/><text x="50.3138%" y="123.50"></text></g><g><title>main.nr:78:22::0x80 (34 gates, 0.00%)</title><rect x="50.0638%" y="133" width="0.0028%" height="23" fill="rgb(255,249,249)" fg:x="597523" fg:w="34"/><text x="50.3138%" y="147.50"></text></g><g><title>acir::blackbox::range (14 gates, 0.00%)</title><rect x="50.0655%" y="109" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="597543" fg:w="14"/><text x="50.3155%" y="123.50"></text></g><g><title>acir::arithmetic (15 gates, 0.00%)</title><rect x="50.0667%" y="109" width="0.0013%" height="23" fill="rgb(255,249,249)" fg:x="597557" fg:w="15"/><text x="50.3167%" y="123.50"></text></g><g><title>acir::memory::init (30 gates, 0.00%)</title><rect x="50.0680%" y="109" width="0.0025%" height="23" fill="rgb(255,249,249)" fg:x="597572" fg:w="30"/><text x="50.3180%" y="123.50"></text></g><g><title>main.nr:78:5::encoded[index] (16,065 gates, 1.35%)</title><rect x="50.0667%" y="133" width="1.3460%" height="23" fill="rgb(255,232,232)" fg:x="597557" fg:w="16065"/><text x="50.3167%" y="147.50"></text></g><g><title>acir::memory::op (16,020 gates, 1.34%)</title><rect x="50.0705%" y="109" width="1.3422%" height="23" fill="rgb(255,232,232)" fg:x="597602" fg:w="16020"/><text x="50.3205%" y="123.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="51.4127%" y="109" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="613622" fg:w="10"/><text x="51.6627%" y="123.50"></text></g><g><title>main.nr:79:5::index += 1 (18 gates, 0.00%)</title><rect x="51.4127%" y="133" width="0.0015%" height="23" fill="rgb(255,249,249)" fg:x="613622" fg:w="18"/><text x="51.6627%" y="147.50"></text></g><g><title>acir::blackbox::range (8 gates, 0.00%)</title><rect x="51.4135%" y="109" width="0.0007%" height="23" fill="rgb(255,249,249)" fg:x="613632" fg:w="8"/><text x="51.6635%" y="123.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="51.4142%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="613640" fg:w="10"/><text x="51.6642%" y="99.50"></text></g><g><title>keccak256.nr:13:12::N &gt;= message_size (19 gates, 0.00%)</title><rect x="51.4142%" y="109" width="0.0016%" height="23" fill="rgb(255,249,249)" fg:x="613640" fg:w="19"/><text x="51.6642%" y="123.50"></text></g><g><title>acir::blackbox::range (9 gates, 0.00%)</title><rect x="51.4151%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="613650" fg:w="9"/><text x="51.6651%" y="99.50"></text></g><g><title>acir::arithmetic (2,660 gates, 0.22%)</title><rect x="51.4158%" y="85" width="0.2229%" height="23" fill="rgb(255,242,242)" fg:x="613659" fg:w="2660"/><text x="51.6658%" y="99.50"></text></g><g><title>keccak256.nr:24:16::i &lt; message_size (9,975 gates, 0.84%)</title><rect x="51.4158%" y="109" width="0.8358%" height="23" fill="rgb(255,236,236)" fg:x="613659" fg:w="9975"/><text x="51.6658%" y="123.50"></text></g><g><title>acir::blackbox::range (7,315 gates, 0.61%)</title><rect x="51.6387%" y="85" width="0.6129%" height="23" fill="rgb(255,238,238)" fg:x="616319" fg:w="7315"/><text x="51.8887%" y="99.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="52.2516%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="623634" fg:w="10"/><text x="52.5016%" y="99.50"></text></g><g><title>keccak256.nr:33:27::(message_size + BLOCK_SIZE_IN_BYTES) / BLOCK_SIZE_IN_BYTES (373 gates, 0.03%)</title><rect x="52.2516%" y="109" width="0.0313%" height="23" fill="rgb(255,247,247)" fg:x="623634" fg:w="373"/><text x="52.5016%" y="123.50"></text></g><g><title>acir::blackbox::range (363 gates, 0.03%)</title><rect x="52.2524%" y="85" width="0.0304%" height="23" fill="rgb(255,247,247)" fg:x="623644" fg:w="363"/><text x="52.5024%" y="99.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="52.2828%" y="85" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="624007" fg:w="5"/><text x="52.5328%" y="99.50"></text></g><g><title>keccak256.nr:33:28::message_size + BLOCK_SIZE_IN_BYTES (14 gates, 0.00%)</title><rect x="52.2828%" y="109" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="624007" fg:w="14"/><text x="52.5328%" y="123.50"></text></g><g><title>acir::blackbox::range (9 gates, 0.00%)</title><rect x="52.2832%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="624012" fg:w="9"/><text x="52.5332%" y="99.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="52.2840%" y="85" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="624021" fg:w="5"/><text x="52.5340%" y="99.50"></text></g><g><title>keccak256.nr:34:29::real_max_blocks * BLOCK_SIZE_IN_BYTES (14 gates, 0.00%)</title><rect x="52.2840%" y="109" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="624021" fg:w="14"/><text x="52.5340%" y="123.50"></text></g><g><title>acir::blackbox::range (9 gates, 0.00%)</title><rect x="52.2844%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="624026" fg:w="9"/><text x="52.5344%" y="99.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="52.2852%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="624035" fg:w="10"/><text x="52.5352%" y="99.50"></text></g><g><title>keccak256.nr:36:33::1 (18 gates, 0.00%)</title><rect x="52.2852%" y="109" width="0.0015%" height="23" fill="rgb(255,249,249)" fg:x="624035" fg:w="18"/><text x="52.5352%" y="123.50"></text></g><g><title>acir::blackbox::range (8 gates, 0.00%)</title><rect x="52.2860%" y="85" width="0.0007%" height="23" fill="rgb(255,249,249)" fg:x="624045" fg:w="8"/><text x="52.5360%" y="99.50"></text></g><g><title>acir::arithmetic (2,660 gates, 0.22%)</title><rect x="52.2867%" y="85" width="0.2229%" height="23" fill="rgb(255,242,242)" fg:x="624053" fg:w="2660"/><text x="52.5367%" y="99.50"></text></g><g><title>acir::memory::init (30 gates, 0.00%)</title><rect x="52.5095%" y="85" width="0.0025%" height="23" fill="rgb(255,249,249)" fg:x="626713" fg:w="30"/><text x="52.7595%" y="99.50"></text></g><g><title>keccak256.nr:36:5::block_bytes[message_size] (2,720 gates, 0.23%)</title><rect x="52.2867%" y="109" width="0.2279%" height="23" fill="rgb(255,242,242)" fg:x="624053" fg:w="2720"/><text x="52.5367%" y="123.50"></text></g><g><title>acir::memory::op (30 gates, 0.00%)</title><rect x="52.5121%" y="85" width="0.0025%" height="23" fill="rgb(255,249,249)" fg:x="626743" fg:w="30"/><text x="52.7621%" y="99.50"></text></g><g><title>keccak256.nr:37:17::real_blocks_bytes - 1 (5 gates, 0.00%)</title><rect x="52.5146%" y="109" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="626773" fg:w="5"/><text x="52.7646%" y="123.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="52.5146%" y="85" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="626773" fg:w="5"/><text x="52.7646%" y="99.50"></text></g><g><title>acir::arithmetic (10 gates, 0.00%)</title><rect x="52.5150%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="626778" fg:w="10"/><text x="52.7650%" y="99.50"></text></g><g><title>keccak256.nr:37:42::0x80 (19 gates, 0.00%)</title><rect x="52.5150%" y="109" width="0.0016%" height="23" fill="rgb(255,249,249)" fg:x="626778" fg:w="19"/><text x="52.7650%" y="123.50"></text></g><g><title>acir::blackbox::range (9 gates, 0.00%)</title><rect x="52.5158%" y="85" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="626788" fg:w="9"/><text x="52.7658%" y="99.50"></text></g><g><title>keccak256.nr:37:5::block_bytes[real_blocks_bytes - 1] (30 gates, 0.00%)</title><rect x="52.5166%" y="109" width="0.0025%" height="23" fill="rgb(255,249,249)" fg:x="626797" fg:w="30"/><text x="52.7666%" y="123.50"></text></g><g><title>acir::memory::op (30 gates, 0.00%)</title><rect x="52.5166%" y="85" width="0.0025%" height="23" fill="rgb(255,249,249)" fg:x="626797" fg:w="30"/><text x="52.7666%" y="99.50"></text></g><g><title>acir::arithmetic (12 gates, 0.00%)</title><rect x="52.5191%" y="85" width="0.0010%" height="23" fill="rgb(255,249,249)" fg:x="626827" fg:w="12"/><text x="52.7691%" y="99.50"></text></g><g><title>keccak256.nr:48:28::block_bytes[limb_start + k] (16,332 gates, 1.37%)</title><rect x="52.5191%" y="109" width="1.3684%" height="23" fill="rgb(255,232,232)" fg:x="626827" fg:w="16332"/><text x="52.7691%" y="123.50"></text></g><g><title>acir::memory::op (16,320 gates, 1.37%)</title><rect x="52.5201%" y="85" width="1.3674%" height="23" fill="rgb(255,232,232)" fg:x="626839" fg:w="16320"/><text x="52.7701%" y="99.50"></text></g><g><title>acir::arithmetic (1,020 gates, 0.09%)</title><rect x="53.8875%" y="85" width="0.0855%" height="23" fill="rgb(255,245,245)" fg:x="643159" fg:w="1020"/><text x="54.1375%" y="99.50"></text></g><g><title>keccak256.nr:52:28::sliced as u64 (9,010 gates, 0.75%)</title><rect x="53.8875%" y="109" width="0.7549%" height="23" fill="rgb(255,237,237)" fg:x="643159" fg:w="9010"/><text x="54.1375%" y="123.50"></text></g><g><title>acir::blackbox::range (7,990 gates, 0.67%)</title><rect x="53.9729%" y="85" width="0.6694%" height="23" fill="rgb(255,237,237)" fg:x="644179" fg:w="7990"/><text x="54.2229%" y="99.50"></text></g><g><title>acir::blackbox::keccakf1600 (86,485 gates, 7.25%)</title><rect x="54.6424%" y="61" width="7.2462%" height="23" fill="rgb(255,209,209)" fg:x="652169" fg:w="86485"/><text x="54.8924%" y="75.50">acir::blac..</text></g><g><title>keccak256.nr:79:17::keccakf1600(state) (86,615 gates, 7.26%)</title><rect x="54.6424%" y="109" width="7.2571%" height="23" fill="rgb(255,209,209)" fg:x="652169" fg:w="86615"/><text x="54.8924%" y="123.50">keccak256...</text></g><g><title>mod.nr:23:9::super::keccakf1600(input) (86,615 gates, 7.26%)</title><rect x="54.6424%" y="85" width="7.2571%" height="23" fill="rgb(255,209,209)" fg:x="652169" fg:w="86615"/><text x="54.8924%" y="99.50">mod.nr:23:..</text></g><g><title>acir::memory::init (130 gates, 0.01%)</title><rect x="61.8886%" y="61" width="0.0109%" height="23" fill="rgb(255,248,248)" fg:x="738654" fg:w="130"/><text x="62.1386%" y="75.50"></text></g><g><title>acir::arithmetic (15 gates, 0.00%)</title><rect x="61.8995%" y="85" width="0.0013%" height="23" fill="rgb(255,249,249)" fg:x="738784" fg:w="15"/><text x="62.1495%" y="99.50"></text></g><g><title>keccak256.nr:81:16::i &lt; real_max_blocks (56 gates, 0.00%)</title><rect x="61.8995%" y="109" width="0.0047%" height="23" fill="rgb(255,249,249)" fg:x="738784" fg:w="56"/><text x="62.1495%" y="123.50"></text></g><g><title>acir::blackbox::range (41 gates, 0.00%)</title><rect x="61.9007%" y="85" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="738799" fg:w="41"/><text x="62.1507%" y="99.50"></text></g><g><title>acir::memory::init (20 gates, 0.00%)</title><rect x="61.9042%" y="85" width="0.0017%" height="23" fill="rgb(255,249,249)" fg:x="738840" fg:w="20"/><text x="62.1542%" y="99.50"></text></g><g><title>keccak256.nr:83:21::state[j] (810 gates, 0.07%)</title><rect x="61.9042%" y="109" width="0.0679%" height="23" fill="rgb(255,246,246)" fg:x="738840" fg:w="810"/><text x="62.1542%" y="123.50"></text></g><g><title>acir::memory::op (790 gates, 0.07%)</title><rect x="61.9059%" y="85" width="0.0662%" height="23" fill="rgb(255,246,246)" fg:x="738860" fg:w="790"/><text x="62.1559%" y="99.50"></text></g><g><title>keccak256.nr:83:32::state[j] ^ sliced_buffer[i * LIMBS_PER_BLOCK + j] (186,972 gates, 15.67%)</title><rect x="61.9720%" y="109" width="15.6656%" height="23" fill="rgb(255,190,190)" fg:x="739650" fg:w="186972"/><text x="62.2220%" y="123.50">keccak256.nr:83:32::stat..</text></g><g><title>acir::blackbox::xor (186,972 gates, 15.67%)</title><rect x="61.9720%" y="85" width="15.6656%" height="23" fill="rgb(255,190,190)" fg:x="739650" fg:w="186972"/><text x="62.2220%" y="99.50">acir::blackbox::xor</text></g><g><title>keccak256.nr:83:32::state[j] (320 gates, 0.03%)</title><rect x="77.6376%" y="109" width="0.0268%" height="23" fill="rgb(255,247,247)" fg:x="926622" fg:w="320"/><text x="77.8876%" y="123.50"></text></g><g><title>acir::memory::op (320 gates, 0.03%)</title><rect x="77.6376%" y="85" width="0.0268%" height="23" fill="rgb(255,247,247)" fg:x="926622" fg:w="320"/><text x="77.8876%" y="99.50"></text></g><g><title>acir::blackbox::keccakf1600 (260,700 gates, 21.84%)</title><rect x="77.6644%" y="61" width="21.8429%" height="23" fill="rgb(255,179,179)" fg:x="926942" fg:w="260700"/><text x="77.9144%" y="75.50">acir::blackbox::keccakf1600</text></g><g><title>keccak256.nr:85:25::keccakf1600(state) (261,200 gates, 21.88%)</title><rect x="77.6644%" y="109" width="21.8848%" height="23" fill="rgb(255,179,179)" fg:x="926942" fg:w="261200"/><text x="77.9144%" y="123.50">keccak256.nr:85:25::keccakf1600(sta..</text></g><g><title>mod.nr:23:9::super::keccakf1600(input) (261,200 gates, 21.88%)</title><rect x="77.6644%" y="85" width="21.8848%" height="23" fill="rgb(255,179,179)" fg:x="926942" fg:w="261200"/><text x="77.9144%" y="99.50">mod.nr:23:9::super::keccakf1600(inp..</text></g><g><title>acir::memory::op (500 gates, 0.04%)</title><rect x="99.5073%" y="61" width="0.0419%" height="23" fill="rgb(255,247,247)" fg:x="1187642" fg:w="500"/><text x="99.7573%" y="75.50"></text></g><g><title>main.nr:132:25::calculate_branch_hash(nodes[i]) (1,167,584 gates, 97.83%)</title><rect x="1.7392%" y="157" width="97.8268%" height="23" fill="rgb(255,101,101)" fg:x="20758" fg:w="1167584"/><text x="1.9892%" y="171.50">main.nr:132:25::calculate_branch_hash(nodes[i])</text></g><g><title>main.nr:90:5::keccak256::keccak256(encoded, index) (574,702 gates, 48.15%)</title><rect x="51.4142%" y="133" width="48.1518%" height="23" fill="rgb(255,145,145)" fg:x="613640" fg:w="574702"/><text x="51.6642%" y="147.50">main.nr:90:5::keccak256::keccak256(encoded, index)</text></g><g><title>keccak256.nr:94:32::lane.to_le_bytes (200 gates, 0.02%)</title><rect x="99.5492%" y="109" width="0.0168%" height="23" fill="rgb(255,248,248)" fg:x="1188142" fg:w="200"/><text x="99.7992%" y="123.50"></text></g><g><title>mod.nr:101:21::self.to_le_radix (200 gates, 0.02%)</title><rect x="99.5492%" y="85" width="0.0168%" height="23" fill="rgb(255,248,248)" fg:x="1188142" fg:w="200"/><text x="99.7992%" y="99.50"></text></g><g><title>mod.nr:165:9::__to_le_radix(self, radix) (200 gates, 0.02%)</title><rect x="99.5492%" y="61" width="0.0168%" height="23" fill="rgb(255,248,248)" fg:x="1188142" fg:w="200"/><text x="99.7992%" y="75.50"></text></g><g><title>acir::blackbox::range (200 gates, 0.02%)</title><rect x="99.5492%" y="37" width="0.0168%" height="23" fill="rgb(255,248,248)" fg:x="1188142" fg:w="200"/><text x="99.7992%" y="51.50"></text></g><g><title>main.nr:133:24::h == parent (384 gates, 0.03%)</title><rect x="99.5660%" y="157" width="0.0322%" height="23" fill="rgb(255,247,247)" fg:x="1188342" fg:w="384"/><text x="99.8160%" y="171.50"></text></g><g><title>acir::arithmetic (384 gates, 0.03%)</title><rect x="99.5660%" y="133" width="0.0322%" height="23" fill="rgb(255,247,247)" fg:x="1188342" fg:w="384"/><text x="99.8160%" y="147.50"></text></g><g><title>acir::arithmetic (11 gates, 0.00%)</title><rect x="99.5982%" y="133" width="0.0009%" height="23" fill="rgb(255,249,249)" fg:x="1188726" fg:w="11"/><text x="99.8482%" y="147.50"></text></g><g><title>main.nr:134:46::prefix_length_limb/2 (39 gates, 0.00%)</title><rect x="99.5982%" y="157" width="0.0033%" height="23" fill="rgb(255,249,249)" fg:x="1188726" fg:w="39"/><text x="99.8482%" y="171.50"></text></g><g><title>acir::blackbox::range (28 gates, 0.00%)</title><rect x="99.5991%" y="133" width="0.0023%" height="23" fill="rgb(255,249,249)" fg:x="1188737" fg:w="28"/><text x="99.8491%" y="147.50"></text></g><g><title>acir::arithmetic (4 gates, 0.00%)</title><rect x="99.6014%" y="133" width="0.0003%" height="23" fill="rgb(255,249,249)" fg:x="1188765" fg:w="4"/><text x="99.8514%" y="147.50"></text></g><g><title>acir::memory::init (14 gates, 0.00%)</title><rect x="99.6018%" y="133" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="1188769" fg:w="14"/><text x="99.8518%" y="147.50"></text></g><g><title>main.nr:135:33::addressHash[prefix_length_byte] (74 gates, 0.01%)</title><rect x="99.6014%" y="157" width="0.0062%" height="23" fill="rgb(255,248,248)" fg:x="1188765" fg:w="74"/><text x="99.8514%" y="171.50"></text></g><g><title>acir::memory::op (56 gates, 0.00%)</title><rect x="99.6029%" y="133" width="0.0047%" height="23" fill="rgb(255,249,249)" fg:x="1188783" fg:w="56"/><text x="99.8529%" y="147.50"></text></g><g><title>main.nr:136:20::prefix_length_limb % 2 == 0 (8 gates, 0.00%)</title><rect x="99.6076%" y="157" width="0.0007%" height="23" fill="rgb(255,249,249)" fg:x="1188839" fg:w="8"/><text x="99.8576%" y="171.50"></text></g><g><title>acir::arithmetic (8 gates, 0.00%)</title><rect x="99.6076%" y="133" width="0.0007%" height="23" fill="rgb(255,249,249)" fg:x="1188839" fg:w="8"/><text x="99.8576%" y="147.50"></text></g><g><title>acir::arithmetic (4 gates, 0.00%)</title><rect x="99.6083%" y="133" width="0.0003%" height="23" fill="rgb(255,249,249)" fg:x="1188847" fg:w="4"/><text x="99.8583%" y="147.50"></text></g><g><title>main.nr:136:20::prefix_length_limb % 2 (14 gates, 0.00%)</title><rect x="99.6083%" y="157" width="0.0012%" height="23" fill="rgb(255,249,249)" fg:x="1188847" fg:w="14"/><text x="99.8583%" y="171.50"></text></g><g><title>acir::blackbox::range (10 gates, 0.00%)</title><rect x="99.6086%" y="133" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="1188851" fg:w="10"/><text x="99.8586%" y="147.50"></text></g><g><title>acir::arithmetic (27 gates, 0.00%)</title><rect x="99.6095%" y="133" width="0.0023%" height="23" fill="rgb(255,249,249)" fg:x="1188861" fg:w="27"/><text x="99.8595%" y="147.50"></text></g><g><title>main.nr:137:29::index &gt;&gt; 4 (51 gates, 0.00%)</title><rect x="99.6095%" y="157" width="0.0043%" height="23" fill="rgb(255,249,249)" fg:x="1188861" fg:w="51"/><text x="99.8595%" y="171.50"></text></g><g><title>acir::blackbox::range (24 gates, 0.00%)</title><rect x="99.6117%" y="133" width="0.0020%" height="23" fill="rgb(255,249,249)" fg:x="1188888" fg:w="24"/><text x="99.8617%" y="147.50"></text></g><g><title>acir::arithmetic (12 gates, 0.00%)</title><rect x="99.6137%" y="133" width="0.0010%" height="23" fill="rgb(255,249,249)" fg:x="1188912" fg:w="12"/><text x="99.8637%" y="147.50"></text></g><g><title>main.nr:139:29::index - (index &gt;&gt; 4) * 0x10 (17 gates, 0.00%)</title><rect x="99.6137%" y="157" width="0.0014%" height="23" fill="rgb(255,249,249)" fg:x="1188912" fg:w="17"/><text x="99.8637%" y="171.50"></text></g><g><title>acir::blackbox::range (5 gates, 0.00%)</title><rect x="99.6148%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="1188924" fg:w="5"/><text x="99.8648%" y="147.50"></text></g><g><title>acir::arithmetic (4 gates, 0.00%)</title><rect x="99.6152%" y="133" width="0.0003%" height="23" fill="rgb(255,249,249)" fg:x="1188929" fg:w="4"/><text x="99.8652%" y="147.50"></text></g><g><title>main.nr:139:37::(index &gt;&gt; 4) * 0x10 (9 gates, 0.00%)</title><rect x="99.6152%" y="157" width="0.0008%" height="23" fill="rgb(255,249,249)" fg:x="1188929" fg:w="9"/><text x="99.8652%" y="171.50"></text></g><g><title>acir::blackbox::range (5 gates, 0.00%)</title><rect x="99.6155%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="1188933" fg:w="5"/><text x="99.8655%" y="147.50"></text></g><g><title>acir::arithmetic (24 gates, 0.00%)</title><rect x="99.6159%" y="133" width="0.0020%" height="23" fill="rgb(255,249,249)" fg:x="1188938" fg:w="24"/><text x="99.8659%" y="147.50"></text></g><g><title>main.nr:139:38::index &gt;&gt; 4 (41 gates, 0.00%)</title><rect x="99.6159%" y="157" width="0.0034%" height="23" fill="rgb(255,249,249)" fg:x="1188938" fg:w="41"/><text x="99.8659%" y="171.50"></text></g><g><title>acir::blackbox::range (17 gates, 0.00%)</title><rect x="99.6179%" y="133" width="0.0014%" height="23" fill="rgb(255,249,249)" fg:x="1188962" fg:w="17"/><text x="99.8679%" y="147.50"></text></g><g><title>acir::arithmetic (132 gates, 0.01%)</title><rect x="99.6194%" y="133" width="0.0111%" height="23" fill="rgb(255,248,248)" fg:x="1188979" fg:w="132"/><text x="99.8694%" y="147.50"></text></g><g><title>acir::memory::init (132 gates, 0.01%)</title><rect x="99.6304%" y="133" width="0.0111%" height="23" fill="rgb(255,248,248)" fg:x="1189111" fg:w="132"/><text x="99.8804%" y="147.50"></text></g><g><title>main.nr:141:26::nodes[i].rows[index] (4,488 gates, 0.38%)</title><rect x="99.6194%" y="157" width="0.3760%" height="23" fill="rgb(255,240,240)" fg:x="1188979" fg:w="4488"/><text x="99.8694%" y="171.50"></text></g><g><title>acir::memory::op (4,224 gates, 0.35%)</title><rect x="99.6415%" y="133" width="0.3539%" height="23" fill="rgb(255,241,241)" fg:x="1189243" fg:w="4224"/><text x="99.8915%" y="147.50"></text></g><g><title>acir::arithmetic (8 gates, 0.00%)</title><rect x="99.9954%" y="133" width="0.0007%" height="23" fill="rgb(255,249,249)" fg:x="1193467" fg:w="8"/><text x="100.2454%" y="147.50"></text></g><g><title>main.nr:141:26::nodes[i] (23 gates, 0.00%)</title><rect x="99.9954%" y="157" width="0.0019%" height="23" fill="rgb(255,249,249)" fg:x="1193467" fg:w="23"/><text x="100.2454%" y="171.50"></text></g><g><title>acir::blackbox::range (15 gates, 0.00%)</title><rect x="99.9961%" y="133" width="0.0013%" height="23" fill="rgb(255,249,249)" fg:x="1193475" fg:w="15"/><text x="100.2461%" y="147.50"></text></g><g><title>acir::arithmetic (3 gates, 0.00%)</title><rect x="99.9973%" y="133" width="0.0003%" height="23" fill="rgb(255,249,249)" fg:x="1193490" fg:w="3"/><text x="100.2473%" y="147.50"></text></g><g><title>main.nr:142:17::prefix_length_limb += 1 (7 gates, 0.00%)</title><rect x="99.9973%" y="157" width="0.0006%" height="23" fill="rgb(255,249,249)" fg:x="1193490" fg:w="7"/><text x="100.2473%" y="171.50"></text></g><g><title>acir::blackbox::range (4 gates, 0.00%)</title><rect x="99.9976%" y="133" width="0.0003%" height="23" fill="rgb(255,249,249)" fg:x="1193493" fg:w="4"/><text x="100.2476%" y="147.50"></text></g><g><title>main.nr:147:23::nodes[i].node_type == 1 (20 gates, 0.00%)</title><rect x="99.9979%" y="157" width="0.0017%" height="23" fill="rgb(255,249,249)" fg:x="1193497" fg:w="20"/><text x="100.2479%" y="171.50"></text></g><g><title>acir::arithmetic (20 gates, 0.00%)</title><rect x="99.9979%" y="133" width="0.0017%" height="23" fill="rgb(255,249,249)" fg:x="1193497" fg:w="20"/><text x="100.2479%" y="147.50"></text></g><g><title>all (1,193,522 gates, 100%)</title><rect x="0.0000%" y="181" width="100.0000%" height="23" fill="rgb(255,100,100)" fg:x="0" fg:w="1193522"/><text x="0.2500%" y="195.50"></text></g><g><title>main.nr:150:24::false (5 gates, 0.00%)</title><rect x="99.9996%" y="157" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="1193517" fg:w="5"/><text x="100.2496%" y="171.50"></text></g><g><title>acir::arithmetic (5 gates, 0.00%)</title><rect x="99.9996%" y="133" width="0.0004%" height="23" fill="rgb(255,249,249)" fg:x="1193517" fg:w="5"/><text x="100.2496%" y="147.50"></text></g></svg></svg>

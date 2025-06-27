@@ -1,0 +1,22 @@
+{
+  "name": "balance_check",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "^0.84.0",
+    "@noir-lang/noir_js": "^1.0.0-beta.6",
+    "@noir-lang/noir_wasm": "^1.0.0-beta.6",
+    "buffer": "^6.0.3",
+    "bytebuffer": "^5.0.1",
+    "ethers": "^6.14.4",
+    "web3": "^4.16.0"
+  },
+  "packageManager": "yarn@4.9.2"
+}
