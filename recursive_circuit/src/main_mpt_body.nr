@@ -121,6 +121,7 @@ fn main(
             root.for_eachi(|i, x| {
                 assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
             });
+            assert(public_inputs[trie_key_index_in_inputs] == 0);
         }
 
         // assert(trie_key_new_index == 3);
@@ -159,6 +160,7 @@ fn main(
                     println("");
                 } else if nodes[i].node_type == 1 {
                     // TODO extension nodes
+                    assert(false);
                 } else {
                     assert(false);
                 }
