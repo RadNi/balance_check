@@ -66,6 +66,8 @@ function hexToBytesPadInverse(raw, length) {
 export function getNodesFromProof(proof) {
   let nodes = []
   let roots = []
+  console.log("proof:")
+  console.log(proof)
   for (let index = 0; index < proof.length; index++) {
     const nodeRaw = proof[index];
     roots.push(hexToBytesPadInverse(ethers.keccak256(nodeRaw), 32))
@@ -94,8 +96,11 @@ export function getNodesFromProof(proof) {
           row_count += 1
         })
       nodes.push(node_)
-    } if (decoded.length == 2 && index != proof.length - 1) {
+    } else if (decoded.length == 2 && index != proof.length - 1) {
       alert("proof has a extension node!")
+    } else {
+      console.log("leaf is here:")
+      console.log(nodeRaw)
     }
   }
   return {"nodes": nodes, "roots": roots}

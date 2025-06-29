@@ -74,12 +74,10 @@ document.getElementById("submit").addEventListener("click", async () => {
 
     let from;
     if (window.ethereum) {
-        console.log(ethers.providers)
-        const provider = new ethers.JsonRpcProvider("https://rpc.purroofgroup.com")
-        console.log("sag2")
-        let address = "0x2a3bf6a4327fe8e393c2850109a2e7c4a42d0eae"
+        const provider = new ethers.JsonRpcProvider("https://docs-demo.quiknode.pro/")
+        let address = "0xC786694997E70439d16B63f8E0Ef9D7358f2C19d"
         let output = await provider.send("eth_getProof", [address, [], "latest"])
-        // console.log(output)
+        console.log(output)
         let encoded = getNodesFromProof(output.accountProof)
         let {account, trie_key} = encodeAccount(output, address)
         let nodes = encoded.nodes
@@ -116,6 +114,7 @@ document.getElementById("submit").addEventListener("click", async () => {
 
 
     // show("logs", "Generating inner circuit witness... ⏳");
+    let cnt = 0
     for (let i = 0; i < nodes.length; i++) {
         input = {
             nodes: [nodes[i]],
@@ -149,10 +148,12 @@ document.getElementById("submit").addEventListener("click", async () => {
     let balanceCheckInput = {
         account: account,
         root: root,
-        balance_target: ["21", "38", "146", "253", "127", "153", "90", "185", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
-        balance_target_length: "8",
+        leaf_hash_: new_roots[new_roots.length - 1],
+        
+        balance_target: ["30", "85", "194", "64", "213", "170", "64", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
+        balance_target_length: "7",
         proof: recursiveProof.proof,
-        trie_key_index: "5",
+        trie_key_index: nodes.length + "",
         verification_key: vkAsFields,
     }
     const { witness } = await balanceCheckNoir.execute(balanceCheckInput)
