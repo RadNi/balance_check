@@ -1,246 +1,249 @@
+global MAX_PATH_LEANGTH: u32 = 9;
+
 global HONK_VK_SIZE: u32 = 128;
 global HONK_PROOF_SIZE: u32 = 456;
 global HONK_IDENTIFIER: u32 = 1;
 
-global STORAGE_HASH: [u8; 32] = [86, 232, 31, 23, 27, 204, 85, 166, 255, 131, 69, 230, 146, 192, 248, 110, 91, 72, 224, 27, 153, 108, 173, 192, 1, 98, 47, 181, 227, 99, 180, 33];
-global CODE_HASH: [u8; 32] = [197, 210, 70, 1, 134, 247, 35, 60, 146, 126, 125, 178, 220, 199, 3, 192, 229, 0, 182, 83, 202, 130, 39, 59, 123, 250, 216, 4, 93, 133, 164, 112];
-
-struct Account {
-    nonce: [u8; 8],
-    balance: [u8; 32],
-    address: [u8; 20],
-    nonce_length: u8,
-    balance_length: u8
+struct Node {
+    rows: [[u8; 32]; 16],
+    row_exist: [bool; 16],
+    node_type: u8
 }
 
-fn get_rlp_length(first_elem: u8, length: u8) -> u8 {
-    let mut rlp_length: u8 = 0;
-    // let mut length: u32 = 0;
-    // let mut index_found = false;
-    // let mut first_elem = 0;
-    // for i in 0 .. N {
-    //     if !index_found {
-    //         if data[i] != 0 {
-    //             index_found = true;
-    //             length = N - i;
-    //             if i + 1 < N {
-    //                 first_elem = data[i+1];
-    //             }
-    //         }
-    //     }
-    // }
-    // TODO assert N <= 55
-    if length == 0 {
-        rlp_length = 0;
-    } else if length == 1 {
-        if first_elem <= 127 {
-            rlp_length = 1;
-        } else {
-            rlp_length = 2;
-        }
-    } else {
-        rlp_length = 1 + length;
-    }
-    rlp_length
-}
-
-fn main(
-    account: Account,
-    root: [u8; 32], 
-
-
-    balance_target: pub [u8; 32], 
-    balance_target_length: pub u8,
-    trie_key_index: u8,
-
-    verification_key: [Field; HONK_VK_SIZE],
-    proof: [Field; HONK_PROOF_SIZE]
-    // public_inputs: [Field; 97]
-    // // root: pub [u8; 32], 
-    // // trie_key: pub [u8; 32], 
-    // // trie_key_new_index (new starting index): pub u8, 
-    // // this_segment_root (leaf_hash): pub [u8; 32]
-
-
-    ) {
-    let trie_key = keccak256::keccak256(account.address, 20);
-    // let mut parent: [u8; 32] = root;
-    let mut prefix_length_limb: u8 = trie_key_index;
+fn calculate_extension_hash(node: Node) -> [u8; 32] {
     
-    let mut key: [u8; 33] = [0; 33];
-
-    if prefix_length_limb % 2 == 0 {
-        key[0] = 0x20;
+    // rows: [
+    //     [first_limb, second_limb, key_length (other than first byte), ..0]
+    //     [right_padded_key (other than first byte)],
+    //     [value],
+    //     0..0
+    // ]
+    
+    let mut encoded: [u8; 68] = [0; 68];
+    let mut encoding_index = 0;
+    let first_limb = node.rows[0][0];
+    let second_limb = node.rows[0][1];
+    let key_total_length = node.rows[0][2] + 1;
+    let mut rlp_data_length: u8 = 0;
+    if key_total_length != 1 {
+        rlp_data_length = 
+            1 + // key_rlp_prefix
+            key_total_length + // key
+            1 + // valye_rlp_prefix
+            32;// value
     } else {
-        let first_elem = trie_key[prefix_length_limb/2];
-        prefix_length_limb += 1;
-        key[0] = 0x30 + (first_elem - (first_elem >> 4) * 0x10);
+        rlp_data_length = 
+            key_total_length + // key
+            1 + // valye_rlp_prefix
+            32;// value
     }
-    let mut index: u8 = 1;
+    if rlp_data_length > 55 {
+        encoded[encoding_index] = 0xF8;
+        encoding_index += 1;
+        encoded[encoding_index] = rlp_data_length;
+        encoding_index += 1;
+    } else {
+        encoded[encoding_index] = 0xC0 + rlp_data_length;
+        encoding_index += 1;
+    }
+    if key_total_length != 1 {
+        encoded[encoding_index] = 0x80 + key_total_length;
+        encoding_index += 1;
+    }
+    encoded[encoding_index] = first_limb * 0x10 + second_limb;
+    encoding_index += 1;
+    for i in 0 .. 31 {
+        if i + 1 <= key_total_length - 1 {
+            encoded[encoding_index] = node.rows[1][i];
+            encoding_index += 1;
+        }
+    }
+    encoded[encoding_index] = 0xA0;
+    encoding_index += 1;
     for i in 0 .. 32 {
-        if i >= prefix_length_limb/2 {
-            key[index] = trie_key[i];
+        encoded[encoding_index] = node.rows[2][i];
+        encoding_index += 1;
+    }
+    keccak256::keccak256(encoded, encoding_index)
+}
+
+fn calculate_branch_hash(node: Node) -> [u8; 32] {
+    let mut len1: u8 = 0;
+    let mut len2: u8 = 0;
+    let mut encoded: [u8; 532] = [0; 532];
+    let mut index: u32 = 0;
+    for i in 0 .. 16 {
+        if node.row_exist[i] == true {
+            if len2 > 255 - 33 {
+                len1 += 1;
+                len2 = len2 - 223;
+            } else {
+                len2 += 33;
+            }
+        } else {
+            if len2 == 255 {
+                len2 = 0;
+                len1 += 1;
+            } else {
+                len2 += 1;
+            }
+        }
+    }
+    if len2 == 255 {
+        len2 = 0;
+        len1 += 1;
+    } else {
+        len2 += 1;
+    }
+    if (len1 == 0) & (len2 <= 55) {
+        encoded[index] = 0xc0 + len2;
+        index += 1;
+    } else if len1 == 0 {
+        encoded[index] = 0xf8;
+        index += 1;
+        encoded[index] = len2;
+        index += 1;
+    } else {
+        encoded[index] = 0xf9;
+        index += 1;
+        encoded[index] = len1;
+        index += 1;
+        encoded[index] = len2;
+        index += 1;
+    }
+
+    for i in 0 .. 16 {
+        if node.row_exist[i] == true {
+            encoded[index] = 0xa0;
+            index += 1;
+            for j in 0 .. 32 {
+                encoded[index] = node.rows[i][j];
+                index += 1;
+            }
+        } else {
+            encoded[index] = 0x80;
             index += 1;
         }
     }
-
-    let key_length = 32 - prefix_length_limb/2 + 1;
-
-    let mut leaf_key_rlp_length= get_rlp_length(key[0], key_length);
-    println(f"key rlp len {leaf_key_rlp_length}");
-
-    let mut leaf_rlp_encoded: [u8; 147] = [0; 147];
-    let leaf_value_rlp_data_length = 
-        get_rlp_length(account.balance[0], account.balance_length)
-        + get_rlp_length(account.nonce[0], account.nonce_length) 
-        + 33 // code hash
-        + 33; // storage hash
-    println(f"value rlp len {leaf_value_rlp_data_length}");
-
-    let leaf_rlp_total_length = leaf_key_rlp_length + leaf_value_rlp_data_length + 2 + 2;
-
-    leaf_rlp_encoded[0] = 0xf8;
-    leaf_rlp_encoded[1] = leaf_rlp_total_length;
-    let mut index: u32 = 2;
-
-    // key
-    if (key_length == 1) & (key[0] <= 127 ) {
-        leaf_rlp_encoded[index] = key[0];
-        index += 1;
-    } else {
-        leaf_rlp_encoded[index] = 0x80 + key_length;
-        index += 1;
-        for i in 0 .. 33 {
-            if i < key_length {
-                leaf_rlp_encoded[index] = key[i];
-                index += 1;
-            }
-        }
-    }
-
-    leaf_rlp_encoded[index] = 0xb8;
+    encoded[index] = 0x80;
     index += 1;
-    leaf_rlp_encoded[index] = leaf_value_rlp_data_length + 2;
-    index += 1;
+    keccak256::keccak256(encoded, index)
+
+}
+
+fn main(
+    nodes: [Node; MAX_PATH_LEANGTH], 
+    node_length: u32,
 
 
-    leaf_rlp_encoded[index] = 0xf8;
-    index += 1;
-    leaf_rlp_encoded[index] = leaf_value_rlp_data_length;
-    index += 1;
+    root: pub [u8; 32],
+    trie_key: pub [u8; 32],
+    trie_key_new_index: pub u32,
+    new_root: pub [u8; 32],
 
-    // nonce
-    if account.nonce_length == 0 {
-        leaf_rlp_encoded[index] = 0x80;
-        index += 1;
-    } else if (account.nonce_length == 1) & (account.nonce[0] <= 127 ) {
-        leaf_rlp_encoded[index] = account.nonce[0];
-        index += 1;
-    } else {
-        leaf_rlp_encoded[index] = 0x80 + account.nonce_length;
-        index += 1;
-        for i in 0 .. 8 {
-            if i < account.nonce_length {
-                leaf_rlp_encoded[index] = account.nonce[i];
-                index += 1;
-            }
-        }
-    }
+    is_initial_proof: bool,
+    // verification_key: [Field; HONK_VK_SIZE],
+    // proof: [Field; HONK_PROOF_SIZE],
+    // public_inputs: [Field; 97]
+    // root: pub [u8; 32], 
+    // trie_key: pub [u8; 32], 
+    // trie_key_new_index (new starting index): pub u8, 
+    // this_segment_root (new_root): pub [u8; 32]
 
-    // balance
-    if account.balance_length == 0 {
-        leaf_rlp_encoded[index] = 0x80;
-        index += 1;
-    } else if (account.balance_length == 1) & (account.balance[0] <= 127 ) {
-        leaf_rlp_encoded[index] = account.balance[0];
-        index += 1;
-    } else {
-        leaf_rlp_encoded[index] = 0x80 + account.balance_length;
-        index += 1;
-        for i in 0 .. 32 {
-            if i < account.balance_length {
-                leaf_rlp_encoded[index] = account.balance[i];
-                index += 1;
-            }
-        }
-    }
 
-    // storage hash
-    leaf_rlp_encoded[index] = 0xa0;
-    index += 1;
-    for i in 0 .. 32 {
-        leaf_rlp_encoded[index] = STORAGE_HASH[i];
-        index += 1;
-    }
+    ) {
+        // if !is_initial_proof{
+        //     std::verify_proof_with_type(
+        //         verification_key,
+        //         proof,
+        //         public_inputs,
+        //         0x0,
+        //         HONK_IDENTIFIER,
+        //     );
+        // }
+        // let root_index_in_inputs = 0;
+        // let trie_key_index_in_inputs: u32 = 32;
+        // let trie_key_initial_limb_index = public_inputs[64] as u32;
+        // let this_segment_root_index_in_inputs = 65;
 
-    // code hash
-    leaf_rlp_encoded[index] = 0xa0;
-    index += 1;
-    for i in 0 .. 32 {
-        leaf_rlp_encoded[index] = CODE_HASH[i];
-        index += 1;
-    }
 
-    let leaf_hash = keccak256::keccak256(leaf_rlp_encoded, index);
+        // root.for_eachi(|i, x| {
+        //     assert(x == public_inputs[i + root_index_in_inputs] as u8);
+        // });
 
-    println("encoding:");
-    leaf_rlp_encoded.for_eachi(|i, x| {
-        if i < index {
-            print(f"{x}, ");
-        }
-    });
-    println("");
+        // trie_key.for_eachi(|i, x| {
+        //     assert(x == public_inputs[i + trie_key_index_in_inputs] as u8);
+        // });
+        // if is_initial_proof{
+        //     root.for_eachi(|i, x| {
+        //         assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
+        //     });
+        //     assert(public_inputs[trie_key_index_in_inputs] == 0);
+        // }
 
-    println("leaf hash:");
-    leaf_hash.for_eachi(|i, x| {
-        print(f"{x}, ");
-    });
-    println("");
+        // assert(trie_key_new_index == 3);
+        // println(f"key index: {trie_key_index_in_inputs}");
+        let mut parent: [u8; 32] = [0; 32];
+        let mut prefix_length_limb: u32 = 0;
+        for i in 0 .. MAX_PATH_LEANGTH {
+            if (i < node_length) {
+                if nodes[i].node_type == 0 { // branch node
+                    let h = calculate_branch_hash(nodes[i]);
+                    if i == 0 {
+                        h.for_eachi(|i, x| {
+                            assert(x == (root[i] as u8));
+                        });
+                    } else {
 
-    // println("parent:");
-    // parent.for_eachi(|i, x| {
-    //     print(f"{x}, ");
-    // });
-    // println("");
-    // assert( leaf_hash== parent);
+                        println("parent: ");
+                        parent.for_each(|x| {
+                            print(f"{x}, ");
+                        });
+                        println(f"");
+                        assert(h == parent);
+                    }
+                    let prefix_length_byte: u32 = prefix_length_limb/2;
+                    let mut index = trie_key[prefix_length_byte] as u32;
+                    if prefix_length_limb % 2 == 0 {
+                        index = index >> 4;
+                    } else {
+                        index = index - (index >> 4) * 0x10;
+                    }
+                    parent = nodes[i].rows[index];
+                    prefix_length_limb += 1;
+                    h.for_each(|x| {
+                        print(f"{x}, ");
+                    });
+                    println("");
+                } else if nodes[i].node_type == 1 {
+                    // TODO extension nodes
+                    println("extension node:");
+                    let h = calculate_extension_hash(nodes[i]);
+                    if i == 0 {
+                        h.for_eachi(|i, x| {
+                            assert(x == (root[i] as u8));
+                        });
+                    } else {
 
-    // balance target
-    let mut result: u8 = 0;
-    if account.balance_length < balance_target_length {
-        result = 1;
-    } else if account.balance_length > balance_target_length {
-        result = 2;
-    } else {
-        for i in 0 .. 32 {
-            if result == 0 {
-                if account.balance[i] < balance_target[i] {
-                    result = 1;
-                } else if account.balance[i] > balance_target[i] {
-                    result = 2;
+                        println("parent: ");
+                        parent.for_each(|x| {
+                            print(f"{x}, ");
+                        });
+                        println(f"");
+                        assert(h == parent);
+                    }
+                    parent = nodes[i].rows[2];
+                    // assert(false);
+                } else {
+                    assert(false);
                 }
             }
         }
-    }
-    assert(result == 2);
-
-    let mut public_inputs: [Field; 97] = [0; 97];
-    for i in 0 .. 32 {
-        public_inputs[i] = root[i] as Field;
-    }
-    for i in 0 .. 32 {
-        public_inputs[i + 32] = trie_key[i] as Field;
-    }
-
-    public_inputs[64] = trie_key_index as Field;
-    for i in 0 .. 32 {
-        public_inputs[i + 65] = leaf_hash[i] as Field;
-    }
-
-    std::verify_proof_with_type(
-        verification_key,
-        proof,
-        public_inputs,
-        0x0,
-        HONK_IDENTIFIER,
-    );
+        println("new root:");
+        parent.for_each(|x| {
+            print(f"{x}, ");
+        });
+        println("");
+        // assert(trie_key_new_index == prefix_length_limb);
+        assert(new_root == parent);
 }
