@@ -10,49 +10,6 @@ struct Node {
     node_type: u8
 }
 
-fn calculate_extension_hash(node: Node) -> [u8; 32] {
-    /**
-    rows: [
-    [first_limb, second_limb, key_length (other than first byte), ..0]
-    [right_padded_key (other than first byte)],
-    [value],
-    0..0
-    ]
-    **/
-    let mut encoded: [u8; 68] = [0; 68];
-    let mut encoding_index = 0;
-    let first_limb = node.rows[0][0];
-    let second_limb = node.rows[0][1];
-    let key_total_length = node.rows[0][2] + 1;
-    let rlp_data_length = 
-        1 + // key_rlp_prefix
-        key_total_length + // key
-        1 + // valye_rlp_prefix
-        32; // value
-    if rlp_data_length > 55 {
-        encoded[encoding_index ++] = 0xF8;
-        encoded[encoding_index ++] = rlp_data_length;
-    } else {
-        encoded[encoding_index ++] = 0xC0 + rlp_data_length;
-    }
-    encoded[encoding_index ++] = 0x80 + key_total_length;
-    encoded[encoding_index ++] = first_limb * 0x10 + second_limb;
-    for i in 0 .. 31 {
-        if i + 1 <= key_total_length - 1 {
-            encoded[encoding_index ++] = node.rows[1][i];
-        }
-    }
-    encoded[encoding_index ++] = 0xA0;
-    for i in 0 .. 32 {
-        encoded[encoding_index ++] = node.rows[2][i];
-    }
-    println(f"length: {encoding_index}");
-    encoded.for_eachi(|i, x| -> {
-        print(f"{x} ");
-    })
-    println("");
-}
-
 fn calculate_branch_hash(node: Node) -> [u8; 32] {
     let mut len1: u8 = 0;
     let mut len2: u8 = 0;
@@ -203,9 +160,7 @@ fn main(
                     println("");
                 } else if nodes[i].node_type == 1 {
                     // TODO extension nodes
-                    println("extension node:");
-                    calculate_extension_hash(nodes[i]);
-                    // assert(false);
+                    assert(false);
                 } else {
                     assert(false);
                 }
