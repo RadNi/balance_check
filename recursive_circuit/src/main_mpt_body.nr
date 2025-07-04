@@ -1,16 +1,10 @@
-global MAX_PATH_LEANGTH: u32 = 1;
-
-global HONK_VK_SIZE: u32 = 128;
-global HONK_PROOF_SIZE: u32 = 456;
-global HONK_IDENTIFIER: u32 = 1;
-
-struct Node {
+pub struct Node {
     rows: [[u8; 32]; 16],
     row_exist: [bool; 16],
     node_type: u8
 }
 
-fn calculate_branch_hash(node: Node) -> [u8; 32] {
+pub fn calculate_branch_hash(node: Node) -> [u8; 32] {
     let mut len1: u8 = 0;
     let mut len2: u8 = 0;
     let mut encoded: [u8; 532] = [0; 532];
@@ -74,36 +68,17 @@ fn calculate_branch_hash(node: Node) -> [u8; 32] {
 
 }
 
-fn main(
+pub fn _base<let MAX_PATH_LEANGTH: u32>(
     nodes: [Node; MAX_PATH_LEANGTH], 
     node_length: u32,
 
+    root: [u8; 32],
+    trie_key: [u8; 32],
+    trie_key_new_index: u32,
+    new_root: [u8; 32],
 
-    root: pub [u8; 32],
-    trie_key: pub [u8; 32],
-    trie_key_new_index: pub u32,
-    new_root: pub [u8; 32],
-
-    is_initial_proof: bool,
-    verification_key: [Field; HONK_VK_SIZE],
-    proof: [Field; HONK_PROOF_SIZE],
     public_inputs: [Field; 97]
-    // root: pub [u8; 32], 
-    // trie_key: pub [u8; 32], 
-    // trie_key_new_index (new starting index): pub u8, 
-    // this_segment_root (new_root): pub [u8; 32]
-
-
     ) {
-        if !is_initial_proof{
-            std::verify_proof_with_type(
-                verification_key,
-                proof,
-                public_inputs,
-                0x0,
-                HONK_IDENTIFIER,
-            );
-        }
         let root_index_in_inputs = 0;
         let trie_key_index_in_inputs: u32 = 32;
         let trie_key_initial_limb_index = public_inputs[64] as u32;
@@ -117,12 +92,6 @@ fn main(
         trie_key.for_eachi(|i, x| {
             assert(x == public_inputs[i + trie_key_index_in_inputs] as u8);
         });
-        if is_initial_proof{
-            root.for_eachi(|i, x| {
-                assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
-            });
-            assert(public_inputs[trie_key_index_in_inputs] == 0);
-        }
 
         // assert(trie_key_new_index == 3);
         // println(f"key index: {trie_key_index_in_inputs}");
