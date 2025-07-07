@@ -5,7 +5,7 @@ global HONK_IDENTIFIER: u32 = 1;
 global STORAGE_HASH: [u8; 32] = [86, 232, 31, 23, 27, 204, 85, 166, 255, 131, 69, 230, 146, 192, 248, 110, 91, 72, 224, 27, 153, 108, 173, 192, 1, 98, 47, 181, 227, 99, 180, 33];
 global CODE_HASH: [u8; 32] = [197, 210, 70, 1, 134, 247, 35, 60, 146, 126, 125, 178, 220, 199, 3, 192, 229, 0, 182, 83, 202, 130, 39, 59, 123, 250, 216, 4, 93, 133, 164, 112];
 
-struct Account {
+pub struct Account {
     nonce: [u8; 8],
     balance: [u8; 32],
     address: [u8; 20],
@@ -44,25 +44,25 @@ fn get_rlp_length(first_elem: u8, length: u8) -> u8 {
     rlp_length
 }
 
-fn main(
+pub fn verify_leaf_node(
     account: Account,
     root: [u8; 32], 
 
 
-    balance_target: pub [u8; 32], 
-    balance_target_length: pub u8,
+    balance_target: [u8; 32], 
+    balance_target_length: u8,
     trie_key_index: u8,
 
     verification_key: [Field; HONK_VK_SIZE],
-    proof: [Field; HONK_PROOF_SIZE]
-    // public_inputs: [Field; 97]
+    proof: [Field; HONK_PROOF_SIZE],
+    public_inputs: [Field; 97 + HONK_VK_SIZE]
     // // root: pub [u8; 32], 
     // // trie_key: pub [u8; 32], 
     // // trie_key_new_index (new starting index): pub u8, 
     // // this_segment_root (leaf_hash): pub [u8; 32]
 
 
-    ) {
+    ){
     let trie_key = keccak256::keccak256(account.address, 20);
     // let mut parent: [u8; 32] = root;
     let mut prefix_length_limb: u8 = trie_key_index;
@@ -223,18 +223,23 @@ fn main(
     }
     assert(result == 2);
 
-    let mut public_inputs: [Field; 97] = [0; 97];
+    // let mut public_inputs: [Field; 97 + HONK_VK_SIZE] = [0; 97 + HONK_VK_SIZE];
     for i in 0 .. 32 {
-        public_inputs[i] = root[i] as Field;
+        assert(public_inputs[i] == root[i] as Field);
     }
     for i in 0 .. 32 {
-        public_inputs[i + 32] = trie_key[i] as Field;
+        assert(public_inputs[i + 32] == trie_key[i] as Field);
     }
 
-    public_inputs[64] = trie_key_index as Field;
+    assert(public_inputs[64] == trie_key_index as Field);
     for i in 0 .. 32 {
-        public_inputs[i + 65] = leaf_hash[i] as Field;
+        assert(public_inputs[i + 65] == leaf_hash[i] as Field);
     }
+
+    for i in 0 .. HONK_VK_SIZE {
+        assert(public_inputs[i + 97] == verification_key[i]);
+    }
+    // public_inputs
 
     std::verify_proof_with_type(
         verification_key,

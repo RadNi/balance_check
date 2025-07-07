@@ -77,7 +77,7 @@ pub fn _base<let MAX_PATH_LEANGTH: u32>(
     trie_key_new_index: u32,
     new_root: [u8; 32],
 
-    public_inputs: [Field; 97]
+    public_inputs: [Field; 209]
     ) {
         let root_index_in_inputs = 0;
         let trie_key_index_in_inputs: u32 = 32;
