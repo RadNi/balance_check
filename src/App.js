@@ -9,14 +9,15 @@ import { encodeAccount, getInitialPublicInputs, getNodesFromProof } from "./util
 let encoded
 let account
 let trie_key
-let nodes
+let nodes_initial
+let nodes_rest
 let root
 let new_roots
 let initial_public_inputs
 
 
 const show = (id, content) => {
-  console.log(id + " " + content)
+  console.log(content)
 };
 
 show("logs", "Generating inner circuit verification key... ⏳");
@@ -44,57 +45,63 @@ async function you() {
     let input;
 
 
+    // initial layer
+    let initial_nodes_length = nodes_initial.length
+    input = {
+      nodes: nodes_initial,
+      node_length: "" + initial_nodes_length,
+      trie_key_new_index: "" + initial_nodes_length,
+      root: root,
+      trie_key: trie_key,
+      new_root: new_roots[initial_nodes_length - 1],
+    }
+    show("logs", "Generating initial circuit witness... ⏳ ");
+    input.public_inputs = initial_public_inputs
+    console.log(input)
+    const initial_witness = await mptBodyInitialCircuitNoir.execute(input)
+    show("logs", "Generating initial proof... ⏳ ");
+    const initial_proof = await mptBodyInitialBackend.generateProof(initial_witness.witness);
+    show("logs", "Verifying initial proof... ⏳");
+    const initial_verified = await mptBodyInitialBackend.verifyProof({ proof: initial_proof.proof, publicInputs: initial_proof.publicInputs });
+    show("logs", "Initial proof verified: " + initial_verified);
+    recursiveProof = {proof: deflattenFields(initial_proof.proof), publicInputs: initial_proof.publicInputs}
 
     // show("logs", "Generating inner circuit witness... ⏳");
-    for (let i = 0; i < nodes.length; i++) {
+    for (let i = 0; i < nodes_rest.length; i++) {
         input = {
-            nodes: [nodes[i]],
-            node_length: "1",
-            trie_key_new_index: ""+(i + 1),
-            root: root,
-            trie_key: trie_key,
-            new_root: new_roots[i],
+          nodes: [nodes_rest[i]],
+          node_length: "1",
+          trie_key_new_index: ""+(i + initial_nodes_length + 1),
+          root: root,
+          trie_key: trie_key,
+          new_root: new_roots[i + initial_nodes_length],
+          proof: recursiveProof.proof,
+          public_inputs: recursiveProof.publicInputs,
         }
-        if ( i == 0 ) {
-          // initial layer
-            show("logs", "Generating recursive circuit witness... ⏳ " + i);
-            input.public_inputs = initial_public_inputs
-            console.log(input)
-            const { witness } = await mptBodyInitialCircuitNoir.execute(input)
-            show("logs", "Generating recursive proof... ⏳ " + i);
-            const {proof, publicInputs} = await mptBodyInitialBackend.generateProof(witness);
-            show("logs", "Verifying intermediary proof... ⏳");
-            const verified = await mptBodyInitialBackend.verifyProof({ proof: proof, publicInputs: publicInputs });
-            show("logs", "Intermediary proof verified: " + verified);
-            recursiveProof = {proof: deflattenFields(proof), publicInputs}
+        if (i == 0) {
+          // second layer
+          input.verification_key = bodyInitialVkAsFields
+          show("logs", "Generating recursive circuit witness... ⏳ " + i);
+          console.log(input)
+          const { witness } = await mptBodyCircuitNoir.execute(input)
+          show("logs", "Generating recursive proof... ⏳ " + i);
+          const {proof, publicInputs} = await mptBodyBackend.generateProof(witness);
+          show("logs", "Verifying intermediary proof... ⏳");
+          const verified = await mptBodyBackend.verifyProof({ proof: proof, publicInputs: publicInputs });
+          show("logs", "Intermediary proof verified: " + verified);
+          recursiveProof = {proof: deflattenFields(proof), publicInputs}
         } else {
-            input.proof = recursiveProof.proof
-            input.public_inputs = recursiveProof.publicInputs
-            if (i == 1) {
-              // second layer
-              input.verification_key = bodyInitialVkAsFields
-              show("logs", "Generating recursive circuit witness... ⏳ " + i);
-              console.log(input)
-              const { witness } = await mptBodyCircuitNoir.execute(input)
-              show("logs", "Generating recursive proof... ⏳ " + i);
-              const {proof, publicInputs} = await mptBodyBackend.generateProof(witness);
-              show("logs", "Verifying intermediary proof... ⏳");
-              const verified = await mptBodyBackend.verifyProof({ proof: proof, publicInputs: publicInputs });
-              show("logs", "Intermediary proof verified: " + verified);
-              recursiveProof = {proof: deflattenFields(proof), publicInputs}
-          } else {
-              // rest of the layers
-              input.verification_key = bodyVkAsFields
-              show("logs", "Generating recursive circuit witness... ⏳ " + i);
-              console.log(input)
-              const { witness } = await mptBodyCircuitNoir.execute(input)
-              show("logs", "Generating recursive proof... ⏳ " + i);
-              const {proof, publicInputs} = await mptBodyBackend.generateProof(witness);
-              show("logs", "Verifying intermediary proof... ⏳");
-              const verified = await mptBodyBackend.verifyProof({ proof: proof, publicInputs: publicInputs });
-              show("logs", "Intermediary proof verified: " + verified);
-              recursiveProof = {proof: deflattenFields(proof), publicInputs}
-          }
+          // rest of the layers
+          input.verification_key = bodyVkAsFields
+          show("logs", "Generating recursive circuit witness... ⏳ " + i);
+          console.log(input)
+          const { witness } = await mptBodyCircuitNoir.execute(input)
+          show("logs", "Generating recursive proof... ⏳ " + i);
+          const {proof, publicInputs} = await mptBodyBackend.generateProof(witness);
+          show("logs", "Verifying intermediary proof... ⏳");
+          const verified = await mptBodyBackend.verifyProof({ proof: proof, publicInputs: publicInputs });
+          show("logs", "Intermediary proof verified: " + verified);
+          recursiveProof = {proof: deflattenFields(proof), publicInputs}
         }
     }
     console.log(recursiveProof.proof)
@@ -111,7 +118,7 @@ async function you() {
         balance_target: ["20", "85", "194", "64", "213", "170", "64", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
         balance_target_length: "7",
         proof: recursiveProof.proof,
-        trie_key_index: nodes.length + "",
+        trie_key_index: nodes_initial.length + nodes_rest.length + "",
         verification_key: bodyVkAsFields,
     }
     console.log(balanceCheckInput)
@@ -143,11 +150,14 @@ async function me() {
         let x = encodeAccount(output, address)
         account = x.account
         trie_key = x.trie_key
-        nodes = encoded.nodes
+        console.log(encoded.nodes_initial)
+        nodes_initial = encoded.nodes_initial
+        nodes_rest = encoded.nodes_rest
         root = encoded.roots[0]
         new_roots = encoded.roots.slice(1)
         initial_public_inputs = getInitialPublicInputs(trie_key, root)
-        console.log(nodes)
+        console.log(nodes_initial)
+        console.log(nodes_rest)
         console.log(account)
         console.log(new_roots)
         console.log(root)

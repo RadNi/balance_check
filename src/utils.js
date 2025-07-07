@@ -79,7 +79,9 @@ function hexToBytesPadInverse(raw, length) {
 }
 
 export function getNodesFromProof(proof) {
-  let nodes = []
+  let nodes_initial = []
+  let nodes_rest = []
+  let nodes_initial_length = 3
   let roots = []
   console.log("proof:")
   console.log(proof)
@@ -93,24 +95,27 @@ export function getNodesFromProof(proof) {
         "row_exist": []
     }
     if (decoded.length == 17) {
-        // branch
-        node_.node_type = "0"
-        let row_count = 0
-        decoded.forEach(row => {
-          if (row_count != 16) {
-            let row_ = []
-            if (row.length == 32) {
-                row.forEach(elem => {row_.push(elem + "")})
-                node_.row_exist.push("1")
-            } else {
-                row_ = Array(32).fill("0")
-                node_.row_exist.push("0")
-            }
-            node_.rows.push(row_)
+      // branch
+      node_.node_type = "0"
+      let row_count = 0
+      decoded.forEach(row => {
+        if (row_count != 16) {
+          let row_ = []
+          if (row.length == 32) {
+              row.forEach(elem => {row_.push(elem + "")})
+              node_.row_exist.push("1")
+          } else {
+              row_ = Array(32).fill("0")
+              node_.row_exist.push("0")
           }
-          row_count += 1
-        })
-      nodes.push(node_)
+          node_.rows.push(row_)
+        }
+        row_count += 1
+      })
+      if (index < nodes_initial_length)
+        nodes_initial.push(node_)
+      else
+        nodes_rest.push(node_)
     } else if (decoded.length == 2 && index != proof.length - 1) {
       alert("proof has a extension node!")
     } else {
@@ -118,7 +123,7 @@ export function getNodesFromProof(proof) {
       console.log(nodeRaw)
     }
   }
-  return {"nodes": nodes, "roots": roots}
+  return {nodes_initial, nodes_rest, roots}
 }
 
 

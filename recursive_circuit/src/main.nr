@@ -1,5 +1,5 @@
 mod main_mpt_body;
-global MAX_PATH_LEANGTH: u32 = 1;
+global MAX_PATH_LEANGTH: u32 = 3;
 
 global HONK_VK_SIZE: u32 = 112;
 global HONK_PROOF_SIZE: u32 = 456;
@@ -9,45 +9,6 @@ global HONK_IDENTIFIER: u32 = 1;
 
 
 // initial layer
-// fn main(
-//     nodes: [main_mpt_body::Node; MAX_PATH_LEANGTH], 
-//     node_length: u32,
-
-
-//     root: pub [u8; 32],
-//     trie_key: pub [u8; 32],
-//     trie_key_new_index: pub u32,
-//     new_root: pub [u8; 32],
-
-//     public_inputs: [Field; 97]
-//     // root: pub [u8; 32], 
-//     // trie_key: pub [u8; 32], 
-//     // trie_key_new_index (new starting index): pub u8, 
-//     // this_segment_root (new_root): pub [u8; 32]
-
-
-//     ) {
-//         let this_segment_root_index_in_inputs = 65;
-//         let trie_key_initial_limb_index = public_inputs[64] as u32;
-
-//         assert(trie_key_initial_limb_index == 0);
-
-//         root.for_eachi(|i, x| {
-//             assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
-//         });
-
-//         main_mpt_body::_base(
-//             nodes, 
-//             node_length, 
-//             root, 
-//             trie_key, 
-//             trie_key_new_index, 
-//             new_root, 
-//             public_inputs);
-// }
-
-
-// rest of the layers
 fn main(
     nodes: [main_mpt_body::Node; MAX_PATH_LEANGTH], 
     node_length: u32,
@@ -58,8 +19,6 @@ fn main(
     trie_key_new_index: pub u32,
     new_root: pub [u8; 32],
 
-    verification_key: [Field; HONK_VK_SIZE],
-    proof: [Field; HONK_PROOF_SIZE],
     public_inputs: [Field; 97]
     // root: pub [u8; 32], 
     // trie_key: pub [u8; 32], 
@@ -68,13 +27,14 @@ fn main(
 
 
     ) {
-        std::verify_proof_with_type(
-            verification_key,
-            proof,
-            public_inputs,
-            0x0,
-            HONK_IDENTIFIER,
-        );
+        let this_segment_root_index_in_inputs = 65;
+        let trie_key_initial_limb_index = public_inputs[64] as u32;
+
+        assert(trie_key_initial_limb_index == 0);
+
+        root.for_eachi(|i, x| {
+            assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
+        });
 
         main_mpt_body::_base(
             nodes, 
@@ -82,9 +42,49 @@ fn main(
             root, 
             trie_key, 
             trie_key_new_index, 
-            new_root,
+            new_root, 
             public_inputs);
 }
+
+
+// rest of the layers
+// fn main(
+//     nodes: [main_mpt_body::Node; MAX_PATH_LEANGTH], 
+//     node_length: u32,
+
+
+//     root: pub [u8; 32],
+//     trie_key: pub [u8; 32],
+//     trie_key_new_index: pub u32,
+//     new_root: pub [u8; 32],
+
+//     verification_key: [Field; HONK_VK_SIZE],
+//     proof: [Field; HONK_PROOF_SIZE],
+//     public_inputs: [Field; 97]
+//     // root: pub [u8; 32], 
+//     // trie_key: pub [u8; 32], 
+//     // trie_key_new_index (new starting index): pub u8, 
+//     // this_segment_root (new_root): pub [u8; 32]
+
+
+//     ) {
+//         std::verify_proof_with_type(
+//             verification_key,
+//             proof,
+//             public_inputs,
+//             0x0,
+//             HONK_IDENTIFIER,
+//         );
+
+//         main_mpt_body::_base(
+//             nodes, 
+//             node_length, 
+//             root, 
+//             trie_key, 
+//             trie_key_new_index, 
+//             new_root,
+//             public_inputs);
+// }
 
 
 
