@@ -21,8 +21,8 @@ fn calculate_extension_hash(node: Node) -> [u8; 32] {
     
     let mut encoded: [u8; 68] = [0; 68];
     let mut encoding_index = 0;
-    let first_limb = node.rows[0][0];
-    let second_limb = node.rows[0][1];
+    let first_limb = node.rows[0][0] % 16;
+    let second_limb = node.rows[0][1] % 16;
     let key_total_length = node.rows[0][2] + 1;
     let mut rlp_data_length: u8 = 0;
     if key_total_length != 1 {
@@ -232,6 +232,36 @@ fn main(
                         println(f"");
                         assert(h == parent);
                     }
+                    // let prefix_length_byte: u32 = prefix_length_limb/2;
+                    let mut extension: u128 = 0;
+                    let mut extension_length_limb: u32 = 0;
+                    let extension_length_byte: u32 = nodes[i].rows[0][2] as u32;
+                    let first_limb: u32 = nodes[i].rows[0][0] as u32;
+                    let second_limb: u32 = (nodes[i].rows[0][1] % 16) as u32;
+                    assert(first_limb * (1 - first_limb) == 0);
+                    if first_limb == 1 {
+                        extension_length_limb = (nodes[i].rows[0][2]*2 + 1) as u32;
+                        extension += second_limb as u128;
+                    } else {
+                        extension_length_limb = (nodes[i].rows[0][2]*2) as u32;
+                    }
+                    for j in 0 .. 32 {
+                        // if j + 1 < extension_length_byte {
+                            extension = ((extension % 0x1000000000000000000000000000000) * 0x100) as u128; // modulo 2^120 = 15 bytes extension
+                            extension += nodes[i].rows[1][j] as u128;
+                        // }
+                    }
+                    println(f"extension length {extension_length_byte}");
+                    // if extension_length_byte != 0 {
+                    //     extension += nodes[i].rows[1][extension_length_byte - 1] as u32;
+                    // }
+                    println(f"extension {extension}");
+                    if prefix_length_limb % 2 == extension_length_limb % 2 {
+
+                    }
+
+                    prefix_length_limb += extension_length_limb;
+
                     parent = nodes[i].rows[2];
                     // assert(false);
                 } else {
