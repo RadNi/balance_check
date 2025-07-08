@@ -1,5 +1,6 @@
 import RLP from "rlp";
 import { ethers } from "ethers";
+import { innner_layer_vk } from "./target/verification_keys";
 
 
 const MAP_HEX = {
@@ -80,7 +81,7 @@ function hexToBytesPadInverse(raw, length) {
 
 export function getNodesFromProof(proof) {
   let nodes_initial = []
-  let nodes_rest = []
+  let nodes_inner = []
   let nodes_initial_length = 3
   let roots = []
   console.log("proof:")
@@ -115,7 +116,7 @@ export function getNodesFromProof(proof) {
       if (index < nodes_initial_length)
         nodes_initial.push(node_)
       else
-        nodes_rest.push(node_)
+        nodes_inner.push(node_)
     } else if (decoded.length == 2 && index != proof.length - 1) {
       alert("proof has a extension node!")
     } else {
@@ -123,7 +124,7 @@ export function getNodesFromProof(proof) {
       console.log(nodeRaw)
     }
   }
-  return {nodes_initial, nodes_rest, roots}
+  return {nodes_initial, nodes_inner, roots}
 }
 
 
@@ -161,6 +162,13 @@ export function getInitialPublicInputs(trie_key, _root) {
   padded_trie_key.forEach(e => {initial_inputs.push(e)})
   initial_inputs.push(trie_key_start_index)
   root.forEach(e => {initial_inputs.push(e)})
+  for (let index = 0; index < 112; index++) {
+    initial_inputs.push("0x0000000000000000000000000000000000000000000000000000000000000000");
+  }
   console.log(initial_inputs)
   return initial_inputs
+}
+
+export function getInitialPlaceHolderInput() {
+  return innner_layer_vk
 }

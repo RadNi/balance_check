@@ -8,7 +8,7 @@ global CODE_HASH: [u8; 32] = [197, 210, 70, 1, 134, 247, 35, 60, 146, 126, 125, 
 pub struct Account {
     nonce: [u8; 8],
     balance: [u8; 32],
-    address: [u8; 20],
+    pub address: [u8; 20],
     nonce_length: u8,
     balance_length: u8
 }

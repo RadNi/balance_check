@@ -1,42 +1,60 @@
-mod mpt_body;
-global MAX_PATH_LEANGTH: u32 = 3;
+mod mpt_leaf;
 
-// initial layer
+global HONK_VK_SIZE: u32 = 112;
+global HONK_PROOF_SIZE: u32 = 456;
+global HONK_IDENTIFIER: u32 = 1;
+
+fn verify_signature(address: [u8; 20], hashed_message : [u8; 32], pub_key_x : [u8; 32], pub_key_y : [u8; 32], signature : [u8; 64]) {
+    let key = ecrecover::secp256k1::PubKey::from_xy(pub_key_x, pub_key_y);
+    let addr = key.ecrecover(signature, hashed_message);
+
+    let mut sum: Field = 0;
+    for i in 0 .. 19 {
+        let x = address[i] as Field;
+        sum += x;
+        sum *= 0x100;
+    }
+    sum += address[19] as Field;
+    assert(addr == sum);
+}
+
+// leaf
 fn main(
-    nodes: [mpt_body::Node; MAX_PATH_LEANGTH], 
-    node_length: u32,
+    account: mpt_leaf::Account,
+    root: [u8; 32], 
 
+    hashed_message : [u8;32], pub_key_x : [u8;32], pub_key_y : [u8;32], signature : [u8;64],
 
-    root: pub [u8; 32],
-    trie_key: pub [u8; 32],
-    trie_key_new_index: pub u32,
-    new_root: pub [u8; 32],
-    // placeholder for inner layers vk
-    placeholder: pub [Field; 112],
+    balance_target: pub [u8; 32], 
+    balance_target_length: pub u8,
+    trie_key_index: u8,
 
-    public_inputs: [Field; 209]
+    verification_key: pub [Field; HONK_VK_SIZE],
+    proof: [Field; HONK_PROOF_SIZE],
+    public_inputs: [Field; 97 + HONK_VK_SIZE]
     // root: pub [u8; 32], 
     // trie_key: pub [u8; 32], 
     // trie_key_new_index (new starting index): pub u8, 
     // this_segment_root (new_root): pub [u8; 32]
-
-
-    ) {
-        let this_segment_root_index_in_inputs = 65;
-        let trie_key_initial_limb_index = public_inputs[64] as u32;
-
-        assert(trie_key_initial_limb_index == 0);
-
-        root.for_eachi(|i, x| {
-            assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
-        });
-
-        mpt_body::_base(
-            nodes, 
-            node_length, 
-            root, 
-            trie_key, 
-            trie_key_new_index, 
-            new_root, 
-            public_inputs);
+    // verification_key: pub [Field, 112] -> it must be inner_mpt_body verification key
+) {
+    verify_signature(account.address, hashed_message, pub_key_x, pub_key_y, signature);
+    std::verify_proof_with_type(
+        verification_key,
+        proof,
+        public_inputs,
+        0x0,
+        HONK_IDENTIFIER,
+    );
+    
+    mpt_leaf::verify_leaf_node(
+        account,
+        root,
+        balance_target,
+        balance_target_length,
+        trie_key_index,
+        verification_key,
+        proof,
+        public_inputs
+    );
 }
