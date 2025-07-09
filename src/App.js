@@ -3,7 +3,7 @@ import mptBodyCircuit from "./target/inner_mpt_body.json";
 import mptBodyInitialCircuit from "./target/initial_mpt_body.json";
 import balanceCheckCircuit from "./target/leaf_check.json";
 import { Noir } from '@noir-lang/noir_js';
-import { encodeAccount, getInitialPublicInputs, getInitialPlaceHolderInput, getNodesFromProof, uint8ArrayToStringArray, fromHex } from "./utils";
+import { encodeAccount, getInitialPublicInputs, getInitialPlaceHolderInput, getNodesFromProof, hexStringToStringUint8Array, uint8ArrayToStringArray } from "./utils";
 import { ethers, recoverAddress, SigningKey } from "ethers";
 import { initial_layer_vk, innner_layer_vk } from "./target/verification_keys";
 import { calculateSigRecovery, ecrecover, fromRPCSig, hashPersonalMessage, pubToAddress } from "@ethereumjs/util";
@@ -92,7 +92,9 @@ async function sign_message(from) {
   // let pubKey_uncompressed = SigningKey.recoverPublicKey(hashed_message, signature);
   // console.log("uncompressed pubkey: ", pubKey_uncompressed);
 
-  signature = uint8ArrayToStringArray(fromHex(signature.substring(2, 130)))
+  // console.log("sag")
+  // console.log(Uint8Array.from(Buffer.from(signature.substring(2, 130), 'hex')))
+  signature = hexStringToStringUint8Array(signature.substring(2, 130))
   // recoverPublicKey returns `0x{hex"4"}{pubKeyXCoord}{pubKeyYCoord}` - so slice 0x04 to expose just the concatenated x and y
   //    see https://github.com/indutny/elliptic/issues/86 for a non-explanation explanation 😂
   // let pubKey = pubKey_uncompressed.slice(4);
@@ -137,7 +139,6 @@ async function you() {
     const initial_verified = await mptBodyInitialBackend.verifyProof({ proof: initial_proof.proof, publicInputs: initial_proof.publicInputs });
     show("logs", "Initial proof verified: " + initial_verified);
     recursiveProof = {proof: deflattenFields(initial_proof.proof), publicInputs: initial_proof.publicInputs}
-
     show("logs", "Generating inner circuit witness... ⏳");
     for (let i = 0; i < nodes_inner.length; i++) {
         input = {
@@ -234,15 +235,14 @@ async function me() {
       let x = encodeAccount(output, address)
       account = x.account
       trie_key = x.trie_key
-      console.log(encoded.nodes_initial)
       nodes_initial = encoded.nodes_initial
       nodes_inner = encoded.nodes_inner
       root = encoded.roots[0]
       new_roots = encoded.roots.slice(1)
       console.log(nodes_initial)
       console.log(nodes_inner)
-      console.log(account)
       console.log(new_roots)
+      console.log(account)
       console.log(root)
         
         // const provider = new ethers.BrowserProvider(window.ethereum)
