@@ -54,6 +54,7 @@ fn main(
         balance_target_length,
         trie_key_index,
         verification_key,
+        proof,
         public_inputs
     );
 }
