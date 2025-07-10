@@ -1,6 +1,4 @@
 global HONK_VK_SIZE: u32 = 112;
-global HONK_PROOF_SIZE: u32 = 456;
-global HONK_IDENTIFIER: u32 = 1;
 
 global STORAGE_HASH: [u8; 32] = [86, 232, 31, 23, 27, 204, 85, 166, 255, 131, 69, 230, 146, 192, 248, 110, 91, 72, 224, 27, 153, 108, 173, 192, 1, 98, 47, 181, 227, 99, 180, 33];
 global CODE_HASH: [u8; 32] = [197, 210, 70, 1, 134, 247, 35, 60, 146, 126, 125, 178, 220, 199, 3, 192, 229, 0, 182, 83, 202, 130, 39, 59, 123, 250, 216, 4, 93, 133, 164, 112];
@@ -54,7 +52,6 @@ pub fn verify_leaf_node(
     trie_key_index: u8,
 
     verification_key: [Field; HONK_VK_SIZE],
-    proof: [Field; HONK_PROOF_SIZE],
     public_inputs: [Field; 97 + HONK_VK_SIZE]
     // // root: pub [u8; 32], 
     // // trie_key: pub [u8; 32], 
@@ -182,7 +179,6 @@ pub fn verify_leaf_node(
     }
 
     let leaf_hash = keccak256::keccak256(leaf_rlp_encoded, index);
-
     println("encoding:");
     leaf_rlp_encoded.for_eachi(|i, x| {
         if i < index {
@@ -223,7 +219,6 @@ pub fn verify_leaf_node(
     }
     assert(result == 2);
 
-    // let mut public_inputs: [Field; 97 + HONK_VK_SIZE] = [0; 97 + HONK_VK_SIZE];
     for i in 0 .. 32 {
         assert(public_inputs[i] == root[i] as Field);
     }
@@ -239,13 +234,5 @@ pub fn verify_leaf_node(
     for i in 0 .. HONK_VK_SIZE {
         assert(public_inputs[i + 97] == verification_key[i]);
     }
-    // public_inputs
 
-    std::verify_proof_with_type(
-        verification_key,
-        proof,
-        public_inputs,
-        0x0,
-        HONK_IDENTIFIER,
-    );
 }

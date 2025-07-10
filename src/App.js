@@ -194,7 +194,6 @@ async function you() {
         trie_key_index: nodes_initial.length + nodes_inner.length + "",
         verification_key: innner_layer_vk,
         hashed_message: hashed_message,
-        // public_key: public_key,
         pub_key_x: pub_key_x,
         pub_key_y: pub_key_y,
         signature: signature,
@@ -232,7 +231,7 @@ async function me() {
       let output = await provider.send("eth_getProof", [address, [], "latest"])
       console.log(output)
       encoded = getNodesFromProof(output.accountProof)
-      let x = encodeAccount(output, address)
+      let x = encodeAccount(encoded.account, address)
       account = x.account
       trie_key = x.trie_key
       nodes_initial = encoded.nodes_initial

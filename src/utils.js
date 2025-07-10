@@ -38,14 +38,15 @@ export function zero_public_input() {
 }
 
 
-function hexToBytesPad(raw, length) {
-  raw = hexToBytes(raw.substring(2)).map(e => e+"")
-  let _length = raw.length
-  for (let index = 0; index < length; index++)
-      if (index >= _length)
-          raw.push("0")
-  return [raw, _length]
-}
+
+// function hexToBytesPad(raw, length) {
+//   raw = hexToBytes(raw.substring(2)).map(e => e+"")
+//   let _length = raw.length
+//   for (let index = 0; index < length; index++)
+//       if (index >= _length)
+//           raw.push("0")
+//   return [raw, _length]
+// }
 
 function hexToBytesPadInverse(raw, length) {
   raw = hexToBytes(raw.substring(2)).map(e => e+"")
@@ -61,6 +62,7 @@ export function getNodesFromProof(proof) {
   let nodes_inner = []
   let nodes_initial_length = 3
   let roots = []
+  let account = []
   console.log("proof:")
   console.log(proof)
   for (let index = 0; index < proof.length; index++) {
@@ -99,21 +101,28 @@ export function getNodesFromProof(proof) {
     } else {
       console.log("leaf is here:")
       console.log(nodeRaw)
+      account = RLP.decode(RLP.decode(nodeRaw)[1])
     }
   }
-  return {nodes_initial, nodes_inner, roots}
+  return {nodes_initial, nodes_inner, roots, account}
 }
 
+function padArray(data, length) {
+  for (let index = data.length; index < length; index++) {
+    data.push(0)
+  }
+  return data
+}
 
 export function encodeAccount(accountRaw, address) {
   let account = {}
-  let balance = hexToBytesPad(accountRaw.balance, 32)
-  let nonce = hexToBytesPad(accountRaw.nonce, 8)
-
-  account.balance = balance[0]
-  account.balance_length = balance[1] + ""
-  account.nonce = nonce[0]
-  account.nonce_length = nonce[1] + ""
+  console.log("before")
+  console.log(accountRaw)
+  console.log(accountRaw[0])
+  account.nonce = padArray(Array.from(accountRaw[0]), 8)
+  account.balance = padArray(Array.from(accountRaw[1]), 32)
+  account.nonce_length = accountRaw[0].length
+  account.balance_length = accountRaw[1].length
 
   console.log("address")
   console.log(address)
