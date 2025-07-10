@@ -187,7 +187,8 @@ fn main(
         let mut prefix_length_limb: u32 = 0;
         for i in 0 .. MAX_PATH_LEANGTH {
             if (i < node_length) {
-                if nodes[i].node_type == 0 { // branch node
+                if nodes[i].node_type == 0 { 
+                    // branch node
                     let h = calculate_branch_hash(nodes[i]);
                     if i == 0 {
                         h.for_eachi(|i, x| {
@@ -238,32 +239,49 @@ fn main(
                     let extension_length_byte: u32 = nodes[i].rows[0][2] as u32;
                     let first_limb: u32 = nodes[i].rows[0][0] as u32;
                     let second_limb: u32 = (nodes[i].rows[0][1] % 16) as u32;
+                    assert(extension_length_byte <= 16); // because extension is 128 bits and we will never have such a big extension!
                     assert(first_limb * (1 - first_limb) == 0);
-                    if first_limb == 1 {
-                        extension_length_limb = (nodes[i].rows[0][2]*2 + 1) as u32;
-                        extension += second_limb as u128;
-                    } else {
-                        extension_length_limb = (nodes[i].rows[0][2]*2) as u32;
-                    }
-                    for j in 0 .. 32 {
-                        // if j + 1 < extension_length_byte {
-                            extension = ((extension % 0x1000000000000000000000000000000) * 0x100) as u128; // modulo 2^120 = 15 bytes extension
+                    assert((1 - first_limb) * second_limb == 0); // if first_limb == 0, second_limb == 0
+                    extension_length_limb = (extension_length_byte * 2 + first_limb) as u32;
+                    assert(extension_length_limb != 0);
+                    extension += second_limb as u128;
+                    for j in 0 .. 15 {
+                        if j < extension_length_byte {
+                            extension *= 0x100;
                             extension += nodes[i].rows[1][j] as u128;
-                        // }
+                        }
                     }
                     println(f"extension length {extension_length_byte}");
-                    // if extension_length_byte != 0 {
-                    //     extension += nodes[i].rows[1][extension_length_byte - 1] as u32;
-                    // }
                     println(f"extension {extension}");
-                    if prefix_length_limb % 2 == extension_length_limb % 2 {
+                    let mut key_extension: u128 = 0;
+                    let mut limb_left = extension_length_limb;
+                    let prefix_length_byte: u32 = prefix_length_limb/2;
+                    let mut trie_key_index = prefix_length_byte;
+                    if prefix_length_limb % 2 == 1 {
+                        limb_left -= 1;
+                        let first_byte = trie_key[trie_key_index] as u32;
+                        key_extension += (first_byte - (first_byte >> 4) * 0x10) as u128;
+                        trie_key_index += 1;
+                    }
+                    for _ in 0 .. 15 {
+                        let next_byte = trie_key[trie_key_index] as u32;
+                        if limb_left == 1{
+                            key_extension *= 0x10;
+                            key_extension += (next_byte >> 4) as u128;
+                            limb_left = 0;
+
+                        } else if limb_left != 0 {
+                            key_extension *= 0x100;
+                            key_extension += next_byte as u128;
+                            limb_left -= 2;
+                        }
+                        trie_key_index += 1;
 
                     }
+                    assert(key_extension == extension);
 
                     prefix_length_limb += extension_length_limb;
-
                     parent = nodes[i].rows[2];
-                    // assert(false);
                 } else {
                     assert(false);
                 }
@@ -274,6 +292,6 @@ fn main(
             print(f"{x}, ");
         });
         println("");
-        // assert(trie_key_new_index == prefix_length_limb);
+        assert(trie_key_new_index == prefix_length_limb);
         assert(new_root == parent);
 }
