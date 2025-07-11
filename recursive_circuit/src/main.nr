@@ -1,138 +1,13 @@
-global MAX_PATH_LEANGTH: u32 = 9;
+mod mpt_body;
+global MAX_PATH_LEANGTH: u32 = 1;
 
-global HONK_VK_SIZE: u32 = 128;
+global HONK_VK_SIZE: u32 = 112;
 global HONK_PROOF_SIZE: u32 = 456;
 global HONK_IDENTIFIER: u32 = 1;
 
-struct Node {
-    rows: [[u8; 32]; 16],
-    row_exist: [bool; 16],
-    node_type: u8
-}
-
-fn calculate_extension_hash(node: Node) -> [u8; 32] {
-    
-    // rows: [
-    //     [first_limb, second_limb, key_length (other than first byte), ..0]
-    //     [right_padded_key (other than first byte)],
-    //     [value],
-    //     0..0
-    // ]
-    
-    let mut encoded: [u8; 68] = [0; 68];
-    let mut encoding_index = 0;
-    let first_limb = node.rows[0][0] % 16;
-    let second_limb = node.rows[0][1] % 16;
-    let key_total_length = node.rows[0][2] + 1;
-    let mut rlp_data_length: u8 = 0;
-    if key_total_length != 1 {
-        rlp_data_length = 
-            1 + // key_rlp_prefix
-            key_total_length + // key
-            1 + // valye_rlp_prefix
-            32;// value
-    } else {
-        rlp_data_length = 
-            key_total_length + // key
-            1 + // valye_rlp_prefix
-            32;// value
-    }
-    if rlp_data_length > 55 {
-        encoded[encoding_index] = 0xF8;
-        encoding_index += 1;
-        encoded[encoding_index] = rlp_data_length;
-        encoding_index += 1;
-    } else {
-        encoded[encoding_index] = 0xC0 + rlp_data_length;
-        encoding_index += 1;
-    }
-    if key_total_length != 1 {
-        encoded[encoding_index] = 0x80 + key_total_length;
-        encoding_index += 1;
-    }
-    encoded[encoding_index] = first_limb * 0x10 + second_limb;
-    encoding_index += 1;
-    for i in 0 .. 31 {
-        if i + 1 <= key_total_length - 1 {
-            encoded[encoding_index] = node.rows[1][i];
-            encoding_index += 1;
-        }
-    }
-    encoded[encoding_index] = 0xA0;
-    encoding_index += 1;
-    for i in 0 .. 32 {
-        encoded[encoding_index] = node.rows[2][i];
-        encoding_index += 1;
-    }
-    keccak256::keccak256(encoded, encoding_index)
-}
-
-fn calculate_branch_hash(node: Node) -> [u8; 32] {
-    let mut len1: u8 = 0;
-    let mut len2: u8 = 0;
-    let mut encoded: [u8; 532] = [0; 532];
-    let mut index: u32 = 0;
-    for i in 0 .. 16 {
-        if node.row_exist[i] == true {
-            if len2 > 255 - 33 {
-                len1 += 1;
-                len2 = len2 - 223;
-            } else {
-                len2 += 33;
-            }
-        } else {
-            if len2 == 255 {
-                len2 = 0;
-                len1 += 1;
-            } else {
-                len2 += 1;
-            }
-        }
-    }
-    if len2 == 255 {
-        len2 = 0;
-        len1 += 1;
-    } else {
-        len2 += 1;
-    }
-    if (len1 == 0) & (len2 <= 55) {
-        encoded[index] = 0xc0 + len2;
-        index += 1;
-    } else if len1 == 0 {
-        encoded[index] = 0xf8;
-        index += 1;
-        encoded[index] = len2;
-        index += 1;
-    } else {
-        encoded[index] = 0xf9;
-        index += 1;
-        encoded[index] = len1;
-        index += 1;
-        encoded[index] = len2;
-        index += 1;
-    }
-
-    for i in 0 .. 16 {
-        if node.row_exist[i] == true {
-            encoded[index] = 0xa0;
-            index += 1;
-            for j in 0 .. 32 {
-                encoded[index] = node.rows[i][j];
-                index += 1;
-            }
-        } else {
-            encoded[index] = 0x80;
-            index += 1;
-        }
-    }
-    encoded[index] = 0x80;
-    index += 1;
-    keccak256::keccak256(encoded, index)
-
-}
-
+// inner layers
 fn main(
-    nodes: [Node; MAX_PATH_LEANGTH], 
+    nodes: [mpt_body::Node; MAX_PATH_LEANGTH], 
     node_length: u32,
 
 
@@ -141,157 +16,156 @@ fn main(
     trie_key_new_index: pub u32,
     new_root: pub [u8; 32],
 
-    is_initial_proof: bool,
-    // verification_key: [Field; HONK_VK_SIZE],
-    // proof: [Field; HONK_PROOF_SIZE],
-    // public_inputs: [Field; 97]
+    verification_key: pub [Field; HONK_VK_SIZE],
+    is_first_inner_layer: bool,
+    proof: [Field; HONK_PROOF_SIZE],
+    public_inputs: [Field; 97 + HONK_VK_SIZE]
     // root: pub [u8; 32], 
     // trie_key: pub [u8; 32], 
     // trie_key_new_index (new starting index): pub u8, 
     // this_segment_root (new_root): pub [u8; 32]
+    // verification_key: pub [Field, 112] -> it must be inner_mpt_body verification key
 
 
     ) {
-        // if !is_initial_proof{
-        //     std::verify_proof_with_type(
-        //         verification_key,
-        //         proof,
-        //         public_inputs,
-        //         0x0,
-        //         HONK_IDENTIFIER,
-        //     );
-        // }
-        // let root_index_in_inputs = 0;
-        // let trie_key_index_in_inputs: u32 = 32;
-        // let trie_key_initial_limb_index = public_inputs[64] as u32;
-        // let this_segment_root_index_in_inputs = 65;
-
-
-        // root.for_eachi(|i, x| {
-        //     assert(x == public_inputs[i + root_index_in_inputs] as u8);
-        // });
-
-        // trie_key.for_eachi(|i, x| {
-        //     assert(x == public_inputs[i + trie_key_index_in_inputs] as u8);
-        // });
-        // if is_initial_proof{
-        //     root.for_eachi(|i, x| {
-        //         assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
-        //     });
-        //     assert(public_inputs[trie_key_index_in_inputs] == 0);
-        // }
-
-        // assert(trie_key_new_index == 3);
-        // println(f"key index: {trie_key_index_in_inputs}");
-        let mut parent: [u8; 32] = [0; 32];
-        let mut prefix_length_limb: u32 = 0;
-        for i in 0 .. MAX_PATH_LEANGTH {
-            if (i < node_length) {
-                if nodes[i].node_type == 0 { 
-                    // branch node
-                    let h = calculate_branch_hash(nodes[i]);
-                    if i == 0 {
-                        h.for_eachi(|i, x| {
-                            assert(x == (root[i] as u8));
-                        });
-                    } else {
-
-                        println("parent: ");
-                        parent.for_each(|x| {
-                            print(f"{x}, ");
-                        });
-                        println(f"");
-                        assert(h == parent);
-                    }
-                    let prefix_length_byte: u32 = prefix_length_limb/2;
-                    let mut index = trie_key[prefix_length_byte] as u32;
-                    if prefix_length_limb % 2 == 0 {
-                        index = index >> 4;
-                    } else {
-                        index = index - (index >> 4) * 0x10;
-                    }
-                    parent = nodes[i].rows[index];
-                    prefix_length_limb += 1;
-                    h.for_each(|x| {
-                        print(f"{x}, ");
-                    });
-                    println("");
-                } else if nodes[i].node_type == 1 {
-                    // TODO extension nodes
-                    println("extension node:");
-                    let h = calculate_extension_hash(nodes[i]);
-                    if i == 0 {
-                        h.for_eachi(|i, x| {
-                            assert(x == (root[i] as u8));
-                        });
-                    } else {
-
-                        println("parent: ");
-                        parent.for_each(|x| {
-                            print(f"{x}, ");
-                        });
-                        println(f"");
-                        assert(h == parent);
-                    }
-                    // let prefix_length_byte: u32 = prefix_length_limb/2;
-                    let mut extension: u128 = 0;
-                    let mut extension_length_limb: u32 = 0;
-                    let extension_length_byte: u32 = nodes[i].rows[0][2] as u32;
-                    let first_limb: u32 = nodes[i].rows[0][0] as u32;
-                    let second_limb: u32 = (nodes[i].rows[0][1] % 16) as u32;
-                    assert(extension_length_byte <= 16); // because extension is 128 bits and we will never have such a big extension!
-                    assert(first_limb * (1 - first_limb) == 0);
-                    assert((1 - first_limb) * second_limb == 0); // if first_limb == 0, second_limb == 0
-                    extension_length_limb = (extension_length_byte * 2 + first_limb) as u32;
-                    assert(extension_length_limb != 0);
-                    extension += second_limb as u128;
-                    for j in 0 .. 15 {
-                        if j < extension_length_byte {
-                            extension *= 0x100;
-                            extension += nodes[i].rows[1][j] as u128;
-                        }
-                    }
-                    println(f"extension length {extension_length_byte}");
-                    println(f"extension {extension}");
-                    let mut key_extension: u128 = 0;
-                    let mut limb_left = extension_length_limb;
-                    let prefix_length_byte: u32 = prefix_length_limb/2;
-                    let mut trie_key_index = prefix_length_byte;
-                    if prefix_length_limb % 2 == 1 {
-                        limb_left -= 1;
-                        let first_byte = trie_key[trie_key_index] as u32;
-                        key_extension += (first_byte - (first_byte >> 4) * 0x10) as u128;
-                        trie_key_index += 1;
-                    }
-                    for _ in 0 .. 15 {
-                        let next_byte = trie_key[trie_key_index] as u32;
-                        if limb_left == 1{
-                            key_extension *= 0x10;
-                            key_extension += (next_byte >> 4) as u128;
-                            limb_left = 0;
-
-                        } else if limb_left != 0 {
-                            key_extension *= 0x100;
-                            key_extension += next_byte as u128;
-                            limb_left -= 2;
-                        }
-                        trie_key_index += 1;
-
-                    }
-                    assert(key_extension == extension);
-
-                    prefix_length_limb += extension_length_limb;
-                    parent = nodes[i].rows[2];
-                } else {
-                    assert(false);
-                }
+        for i in 0 .. HONK_VK_SIZE {
+            assert(verification_key[i] == public_inputs[i + 97]);
+        }
+        let mut final_verification_key: [Field; HONK_VK_SIZE] = [0; HONK_VK_SIZE];
+        if is_first_inner_layer {
+            final_verification_key = [
+                1048576,
+                225,
+                1,
+                209,
+                35852114118850286421483606229307043140175,
+                174013477758419928133052380405475366,
+                23375804585296085376748969920252114021248,
+                168705179218435080499564079307248918,
+                31725365149191034272901933969884891245439,
+                221313314104406683882154514807051084,
+                65823323123293817367292252600839578324812,
+                217419527791268970059834978939754245,
+                7929442105713261471730528031633358446512,
+                9846867888505536426978913042550569,
+                24473312426805281351453854884857035113681,
+                81293043268213340929633817475256933,
+                76086441360730879829382557494020652356693,
+                208123502961722000259926103522108477,
+                74136437878387567726741919407049708216770,
+                90744002212507481093030233294203489,
+                50042758552549678684718270280528087147667,
+                137524930519910341640698404766352992,
+                28840706861576096844178590711761704973952,
+                217336441813896442853369398747785776,
+                54792061639984819956237596272630356939895,
+                127499448943189919785780260596284240,
+                45992681346014321804372635305952018665151,
+                106680727516298462256187825466114164,
+                14562079748939669045969884319659605234449,
+                126959960760226029796451505354331171,
+                8622481582902879799671817138746487140884,
+                194305288901144261759125389005715512,
+                23949653025405514435257422256810352094022,
+                244025231827416919622248753868407513,
+                68776104395510455692756389491337388574130,
+                111469651008874366597783225313101525,
+                41071512718564621668291742192462300547272,
+                57345558009113699041241139978107456,
+                23756415256265468227768406840493162050130,
+                43141062911128778264113750179333684,
+                78225515004134527760071860926715117156113,
+                107281214250149049052568974420036457,
+                1480565341806492334911494117263981501426,
+                19416045469644200898091524251243680,
+                19146801254292839619380717647925089112842,
+                130970706468255111293713792224453820,
+                438949730902211612777165603383340186257,
+                1805562792083276602061154563549718,
+                10603715524708885842455603108617271961103,
+                144193169531067895401635483352245891,
+                85204303503118844912017508594839698919303,
+                248164117528028051884943751148472431,
+                30322305567071116830473029596252475240804,
+                36121754251293032374231278154544066,
+                46575510731033327497322757272273080727791,
+                23739843636661841929850252356872107,
+                72240650429267289466462822791243650900174,
+                209764950356568871571496340158175635,
+                77531942765078167985281495814927371011554,
+                88996044736828688677151521235293955,
+                1927447369815589466235674113944409204883,
+                208087207180953719302020681420871592,
+                44568281539141316457462486049923523552527,
+                249427561859915967314973681519333802,
+                6120927595024671427659928566070783837454,
+                76056969204721360044988267851985015,
+                24283922965114202476915529193559427046464,
+                52668276552639639800634371878979430,
+                72225205239232134520753906978769947007982,
+                122608235366775050705968944001121329,
+                43238197325349630555945862615272238392954,
+                120298116262421275594996086382885364,
+                10906265785743171600678271262854427644113,
+                110197741701231194549904054532493490,
+                23318486558042583925024562609579479002181,
+                132596002798063154483482948914292579,
+                18393727802941482660386903258615221276792,
+                135916820614870513646064263133697435,
+                38397317595007799874392144229881755837396,
+                213514528367058576192786706301150420,
+                69215375782454550536425439587704475782614,
+                102861820669959245074868622695170802,
+                46095121040940777680643473097752988182288,
+                15062889451671602379542198310967843,
+                58522949039337991199463254255218677284585,
+                118290797044487762242954795624276982,
+                59810119330833799635779725350720007971208,
+                121126680782031160665233281506306040,
+                5230568830255399478217882289393174572539,
+                187256836856408687606915590575793499,
+                21167304966653535593756565776664505859285,
+                13222222399007114305009339939514881,
+                40841317154504669125062909368658230417523,
+                48660439166524242800751628985008000,
+                63633358407414013974970760687390576508954,
+                152328830869130815932818377090050320,
+                32632673975154353464743639744426768189675,
+                161345867627325753413513193657008662,
+                7968186977597110300930661051042053881787,
+                62350047227692126012885535617178175,
+                79241685421966187411826806985286947739545,
+                67527410087798381163687543068194786,
+                75737240769260953837256546245274457998044,
+                119976831463465369199767598881810392,
+                1,
+                0,
+                2,
+                0,
+                7322347811288398249058967611354313740153,
+                93192695519533333238230410688812689,
+                69806679625432378923663382905888076619904,
+                24336534741543004006003224530770631
+            ]
+        } else {
+            for i in 0 .. HONK_VK_SIZE {
+                final_verification_key[i] = verification_key[i];                
             }
         }
-        println("new root:");
-        parent.for_each(|x| {
-            print(f"{x}, ");
-        });
-        println("");
-        assert(trie_key_new_index == prefix_length_limb);
-        assert(new_root == parent);
+        std::verify_proof_with_type(
+            final_verification_key,
+            proof,
+            public_inputs,
+            0x0,
+            HONK_IDENTIFIER,
+        );
+
+        mpt_body::verify_nodes(
+            nodes, 
+            node_length, 
+            root, 
+            trie_key, 
+            trie_key_new_index, 
+            new_root,
+            public_inputs);
 }
