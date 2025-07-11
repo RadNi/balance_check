@@ -58,52 +58,110 @@ function hexToBytesPadInverse(raw, length) {
 }
 
 export function getNodesFromProof(proof) {
-  let nodes_initial = []
-  let nodes_inner = []
-  let nodes_initial_length = 3
-  let roots = []
-  let account = []
+  const nodes_initial = []
+  const nodes_inner = []
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  let account = {}
+  const nodes_initial_length = 3
+  const roots = []
   console.log("proof:")
   console.log(proof)
   for (let index = 0; index < proof.length; index++) {
     const nodeRaw = proof[index];
     roots.push(hexToBytesPadInverse(ethers.keccak256(nodeRaw), 32))
 
-    let decoded = RLP.decode(nodeRaw)
-    let node_ = {
-        "rows": [],
-        "row_exist": []
-    }
+    const decoded = RLP.decode(nodeRaw)
+    let node_type
+    const rows = []
+    const row_exist = []
+    let prefix_addition
     if (decoded.length == 17) {
       // branch
-      node_.node_type = "0"
+      node_type = 0
+      prefix_addition = 1
       let row_count = 0
+      console.log("injaaaa")
+      console.log(decoded)
       decoded.forEach(row => {
-        if (row_count != 16) {
-          let row_ = []
-          if (row.length == 32) {
-              row.forEach(elem => {row_.push(elem + "")})
-              node_.row_exist.push("1")
-          } else {
-              row_ = Array(32).fill("0")
-              node_.row_exist.push("0")
+        if (row instanceof Uint8Array) {
+          if (row_count != 16) {
+            let row_ = []
+            if (row.length == 32) {
+                row_ = Array.from(row)
+                row_exist.push(1)
+            } else {
+                /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+                row_ = Array(32).fill(0)
+                row_exist.push(0)
+            }
+            rows.push(row_)
           }
-          node_.rows.push(row_)
+          row_count += 1
         }
-        row_count += 1
       })
+    } else if (decoded.length == 2 && index != proof.length - 1) {
+      console.log("proof has a extension node!")
+      node_type = 1
+      if (decoded[0] instanceof Uint8Array && decoded[1] instanceof Uint8Array) {
+        const first_row = Array(32).fill(0)
+        /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style*/
+        first_row[0] = ((decoded[0][0]) >> 4) & 0xF
+        first_row[1] = decoded[0][0] & 0xF
+        first_row[2] = decoded[0].length - 1
+        rows.push(first_row)
+
+        const second_row = Array(32).fill(0)
+        for (let index = 0; index < first_row[2]; index++) {
+          second_row[index] = decoded[0][index + 1];
+        }
+        rows.push(second_row)
+
+        let third_row= []
+        decoded[1].map(e => third_row.push(e))
+        while (third_row.length != 32) {
+          third_row = [0].concat(third_row)
+        }
+        rows.push(third_row)
+
+        const zero = Array(32).fill(0)
+        for (let index = 0; index < 13; index++)
+          rows.push(zero)
+
+        for (let index = 0; index < 16; index++)
+          row_exist.push(0)
+
+        prefix_addition = first_row[2] * 2 + first_row[0]
+      } else {
+        throw Error("extension node has wrong format!")
+      }
+    } else {
+      console.log("leaf is here:")
+      console.log(nodeRaw)
+      node_type = 2
+      account = RLP.decode(RLP.decode(nodeRaw)[1])
+      prefix_addition = 0
+    }
+
+    const node_ = {
+        "rows": rows,
+        "row_exist": row_exist,
+        "node_type": node_type,
+        "prefix_addition": prefix_addition
+    }
+
+    if (node_type != 2) {
       if (index < nodes_initial_length)
         nodes_initial.push(node_)
       else
         nodes_inner.push(node_)
-    } else if (decoded.length == 2 && index != proof.length - 1) {
-      alert("proof has a extension node!")
-    } else {
-      console.log("leaf is here:")
-      console.log(nodeRaw)
-      account = RLP.decode(RLP.decode(nodeRaw)[1])
     }
   }
+  console.log("nodes initial")
+  console.log(nodes_initial)
+  console.log("nodes_inner")
+  console.log(nodes_inner)
+  console.log("roots")
+  console.log(roots)
   return {nodes_initial, nodes_inner, roots, account}
 }
 
