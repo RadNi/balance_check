@@ -1,9 +1,14 @@
-pub struct Node {
+global MAX_PATH_LEANGTH: u32 = 9;
+
+global HONK_VK_SIZE: u32 = 128;
+global HONK_PROOF_SIZE: u32 = 456;
+global HONK_IDENTIFIER: u32 = 1;
+
+struct Node {
     rows: [[u8; 32]; 16],
     row_exist: [bool; 16],
     node_type: u8
 }
-
 
 fn calculate_extension_hash(node: Node) -> [u8; 32] {
     // rows: [
@@ -61,8 +66,7 @@ fn calculate_extension_hash(node: Node) -> [u8; 32] {
     keccak256::keccak256(encoded, encoding_index)
 }
 
-
-pub fn calculate_branch_hash(node: Node) -> [u8; 32] {
+fn calculate_branch_hash(node: Node) -> [u8; 32] {
     let mut len1: u8 = 0;
     let mut len2: u8 = 0;
     let mut encoded: [u8; 532] = [0; 532];
@@ -126,48 +130,78 @@ pub fn calculate_branch_hash(node: Node) -> [u8; 32] {
 
 }
 
-pub fn verify_nodes<let MAX_PATH_LEANGTH: u32>(
+fn main(
     nodes: [Node; MAX_PATH_LEANGTH], 
     node_length: u32,
 
-    root: [u8; 32],
-    trie_key: [u8; 32],
-    trie_key_new_index: u32,
-    new_root: [u8; 32],
 
-    public_inputs: [Field; 209]
+    root: pub [u8; 32],
+    trie_key: pub [u8; 32],
+    trie_key_new_index: pub u32,
+    new_root: pub [u8; 32],
+
+    is_initial_proof: bool,
+    // verification_key: [Field; HONK_VK_SIZE],
+    // proof: [Field; HONK_PROOF_SIZE],
+    // public_inputs: [Field; 97]
+    // root: pub [u8; 32], 
+    // trie_key: pub [u8; 32], 
+    // trie_key_new_index (new starting index): pub u8, 
+    // this_segment_root (new_root): pub [u8; 32]
+
+
     ) {
-        let root_index_in_inputs = 0;
-        let trie_key_index_in_inputs: u32 = 32;
-        let trie_key_initial_limb_index = public_inputs[64] as u32;
-        let this_segment_root_index_in_inputs = 65;
+        // if !is_initial_proof{
+        //     std::verify_proof_with_type(
+        //         verification_key,
+        //         proof,
+        //         public_inputs,
+        //         0x0,
+        //         HONK_IDENTIFIER,
+        //     );
+        // }
+        // let root_index_in_inputs = 0;
+        // let trie_key_index_in_inputs: u32 = 32;
+        // let trie_key_initial_limb_index = public_inputs[64] as u32;
+        // let this_segment_root_index_in_inputs = 65;
 
 
-        root.for_eachi(|i, x| {
-            assert(x == public_inputs[i + root_index_in_inputs] as u8);
-        });
+        // root.for_eachi(|i, x| {
+        //     assert(x == public_inputs[i + root_index_in_inputs] as u8);
+        // });
 
-        trie_key.for_eachi(|i, x| {
-            assert(x == public_inputs[i + trie_key_index_in_inputs] as u8);
-        });
+        // trie_key.for_eachi(|i, x| {
+        //     assert(x == public_inputs[i + trie_key_index_in_inputs] as u8);
+        // });
+        // if is_initial_proof{
+        //     root.for_eachi(|i, x| {
+        //         assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
+        //     });
+        //     assert(public_inputs[trie_key_index_in_inputs] == 0);
+        // }
 
-        println(f"key index: {trie_key_index_in_inputs}");
+        // assert(trie_key_new_index == 3);
+        // println(f"key index: {trie_key_index_in_inputs}");
         let mut parent: [u8; 32] = [0; 32];
-        for i in 0 ..  32 {
-            parent[i] = public_inputs[this_segment_root_index_in_inputs + i] as u8;
-        }
-        let mut prefix_length_limb: u32 = trie_key_initial_limb_index;
+        let mut prefix_length_limb: u32 = 0;
         for i in 0 .. MAX_PATH_LEANGTH {
             if (i < node_length) {
                 if nodes[i].node_type == 0 { 
                     // branch node
                     let h = calculate_branch_hash(nodes[i]);
-                    println("parent: ");
-                    parent.for_each(|x| {
-                        print(f"{x}, ");
-                    });
-                    println(f"");
-                    assert(h == parent);
+                    if i == 0 {
+                        h.for_eachi(|i, x| {
+                            assert(x == (root[i] as u8));
+                        });
+                    } else {
+
+                        println("parent: ");
+                        parent.for_each(|x| {
+                            print(f"{x}, ");
+                        });
+                        println(f"");
+                        assert(h == parent);
+                    }
                     let prefix_length_byte: u32 = prefix_length_limb/2;
                     let mut index = trie_key[prefix_length_byte] as u32;
                     if prefix_length_limb % 2 == 0 {
@@ -185,12 +219,20 @@ pub fn verify_nodes<let MAX_PATH_LEANGTH: u32>(
                     // extension nodes
                     println("extension node:");
                     let h = calculate_extension_hash(nodes[i]);
-                    println("parent: ");
-                    parent.for_each(|x| {
-                        print(f"{x}, ");
-                    });
-                    println(f"");
-                    assert(h == parent);
+                    if i == 0 {
+                        h.for_eachi(|i, x| {
+                            assert(x == (root[i] as u8));
+                        });
+                    } else {
+
+                        println("parent: ");
+                        parent.for_each(|x| {
+                            print(f"{x}, ");
+                        });
+                        println(f"");
+                        assert(h == parent);
+                    }
+                    // let prefix_length_byte: u32 = prefix_length_limb/2;
                     let mut extension: u128 = 0;
                     let mut extension_length_limb: u32 = 0;
                     let extension_length_byte: u32 = nodes[i].rows[0][2] as u32;

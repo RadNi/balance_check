@@ -48,7 +48,7 @@ const balanceCheckBackend = new UltraHonkBackend(balanceCheckCircuit.bytecode, {
 
 async function sign_message(from) {
   
-  var msg = "salam"
+  var msg = "RadNi is here!"
   signature = await window.ethereum.request({
       method: "personal_sign",
       params: [msg, from],

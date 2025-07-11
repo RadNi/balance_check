@@ -31,7 +31,7 @@ fn main(
             assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
         });
 
-        mpt_body::_base(
+        mpt_body::verify_nodes(
             nodes, 
             node_length, 
             root, 
