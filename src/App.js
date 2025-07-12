@@ -8,6 +8,8 @@ import { ethers, recoverAddress, SigningKey } from "ethers";
 import { initial_layer_vk, innner_layer_vk } from "./target/verification_keys";
 import { calculateSigRecovery, ecrecover, fromRPCSig, hashPersonalMessage, pubToAddress } from "@ethereumjs/util";
 
+const balance_target = [ 5, 84, 61, 247, 41, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+const balance_target_length = 7
 
 let encoded
 let account
@@ -45,10 +47,18 @@ const balanceCheckBackend = new UltraHonkBackend(balanceCheckCircuit.bytecode, {
 // console.log(bodyInitialVkAsFields)
 // console.log("inner layers vkAsFields:")
 // console.log(bodyVkAsFields)
+function buf2Bigint(buffer) { // buffer is an ArrayBuffer
+  return ethers.formatUnits("0x" + ([...new Uint8Array(buffer)]
+      .map(x => x.toString(16).padStart(2, '0'))
+      .join('')))
+}
 
 async function sign_message(from) {
   
-  var msg = "RadNi is here!"
+  var msg = JSON.stringify({
+    message: "RadNi is here!",
+    balance_target: buf2Bigint((new Uint8Array(balance_target.slice(0, balance_target_length))).buffer).toString()
+  }, null, 2)
   signature = await window.ethereum.request({
       method: "personal_sign",
       params: [msg, from],
@@ -202,8 +212,8 @@ async function you() {
         root: root,
         leaf_hash_: new_roots[new_roots.length - 1],
         
-        balance_target: ["20", "85", "194", "64", "213", "170", "64", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
-        balance_target_length: "7",
+        balance_target: balance_target,
+        balance_target_length: balance_target_length,
         proof: recursiveProof.proof,
         trie_key_index: nodes_initial.length + nodes_inner.length + "",
         verification_key: innner_layer_vk,

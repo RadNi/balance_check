@@ -18,6 +18,32 @@ fn verify_signature(address: [u8; 20], hashed_message : [u8; 32], pub_key_x : [u
     assert(addr == sum);
 }
 
+fn verify_balance(
+    account: mpt_leaf::Account,
+    balance_target: [u8; 32],
+    balance_target_length: u8
+    ) {
+
+    // balance target
+    let mut result: u8 = 0;
+    if account.balance_length < balance_target_length {
+        result = 1;
+    } else if account.balance_length > balance_target_length {
+        result = 2;
+    } else {
+        for i in 0 .. 32 {
+            if result == 0 {
+                if account.balance[i] < balance_target[i] {
+                    result = 1;
+                } else if account.balance[i] > balance_target[i] {
+                    result = 2;
+                }
+            }
+        }
+    }
+    assert(result == 2);
+}
+
 // leaf
 fn main(
     account: mpt_leaf::Account,
@@ -25,7 +51,7 @@ fn main(
 
     hashed_message : [u8;32], pub_key_x : [u8;32], pub_key_y : [u8;32], signature : [u8;64],
 
-    balance_target: pub [u8; 32], 
+    balance_target: pub [u8; 32],
     balance_target_length: pub u8,
     trie_key_index: u8,
 
@@ -46,14 +72,33 @@ fn main(
         0x0,
         HONK_IDENTIFIER,
     );
+    let mut trie_key: [u8; 32] = [0; 32];
+    let mut leaf_hash: [u8; 32] = [0; 32];
+
+    for i in 0 .. 32 {
+        trie_key[i] = public_inputs[i + 32] as u8;
+    }
+
+    for i in 0 .. 32 {
+        assert(public_inputs[i] == root[i] as Field);
+    }
+
+    assert(public_inputs[64] == trie_key_index as Field);
+
+    for i in 0 .. 32 {
+        leaf_hash[i] = public_inputs[i + 65] as u8;
+    }
+
+    for i in 0 .. HONK_VK_SIZE {
+        assert(public_inputs[i + 97] == verification_key[i]);
+    }
     
-    mpt_leaf::verify_leaf_node(
-        account,
-        root,
-        balance_target,
-        balance_target_length,
+    account.verify_leaf_node(
         trie_key_index,
-        verification_key,
-        public_inputs
+        trie_key,
+        leaf_hash
     );
+
+    // balance target
+    verify_balance(account, balance_target, balance_target_length);
 }
