@@ -1,4 +1,5 @@
-mod mpt_body;
+use mpt::mpt_body;
+
 global MAX_PATH_LEANGTH: u32 = 3;
 
 // initial layer
@@ -21,22 +22,22 @@ fn main(
     // this_segment_root (new_root): pub [u8; 32]
 
 
-    ) {
-        let this_segment_root_index_in_inputs = 65;
-        let trie_key_initial_limb_index = public_inputs[64] as u32;
+) {
+    let this_segment_root_index_in_inputs = 65;
+    let trie_key_initial_limb_index = public_inputs[64] as u32;
 
-        assert(trie_key_initial_limb_index == 0);
+    assert(trie_key_initial_limb_index == 0);
 
-        root.for_eachi(|i, x| {
-            assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
-        });
+    root.for_eachi(|i, x| {
+        assert(x == public_inputs[i + this_segment_root_index_in_inputs] as u8);
+    });
 
-        mpt_body::verify_nodes(
-            nodes, 
-            node_length, 
-            root, 
-            trie_key, 
-            trie_key_new_index, 
-            new_root, 
-            public_inputs);
+    mpt_body::verify_nodes(
+        nodes, 
+        node_length, 
+        root, 
+        trie_key, 
+        trie_key_new_index, 
+        new_root, 
+        public_inputs);
 }

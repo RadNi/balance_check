@@ -35,18 +35,18 @@ const mptBodyInitialBackend = new UltraHonkBackend(mptBodyInitialCircuit.bytecod
 
 const mptBodyCircuitNoir = new Noir(mptBodyCircuit);
 const mptBodyBackend = new UltraHonkBackend(mptBodyCircuit.bytecode, { threads: 5 }, { recursive: true });
-// const mptBodyCircuitVerificationKey = await mptBodyBackend.getVerificationKey();
+const mptBodyCircuitVerificationKey = await mptBodyBackend.getVerificationKey();
 
 const balanceCheckNoir = new Noir(balanceCheckCircuit);
 const balanceCheckBackend = new UltraHonkBackend(balanceCheckCircuit.bytecode, { threads: 5 }, { recursive: true });
 
-// const barretenbergAPI = await Barretenberg.new({ threads: 5 });
+const barretenbergAPI = await Barretenberg.new({ threads: 5 });
 // const bodyInitialVkAsFields = (await barretenbergAPI.acirVkAsFieldsUltraHonk(new RawBuffer(mptBodyInitialCircuitVerificationKey))).map(field => field.toString());
-// const bodyVkAsFields = (await barretenbergAPI.acirVkAsFieldsUltraHonk(new RawBuffer(mptBodyCircuitVerificationKey))).map(field => field.toString());
+const bodyVkAsFields = (await barretenbergAPI.acirVkAsFieldsUltraHonk(new RawBuffer(mptBodyCircuitVerificationKey))).map(field => field.toString());
 // console.log("initial layer vkAsFields:")
 // console.log(bodyInitialVkAsFields)
-// console.log("inner layers vkAsFields:")
-// console.log(bodyVkAsFields)
+console.log("inner layers vkAsFields:")
+console.log(bodyVkAsFields)
 function buf2Bigint(buffer) { // buffer is an ArrayBuffer
   return ethers.formatUnits("0x" + ([...new Uint8Array(buffer)]
       .map(x => x.toString(16).padStart(2, '0'))
@@ -216,7 +216,6 @@ async function you() {
         balance_target_length: balance_target_length,
         proof: recursiveProof.proof,
         trie_key_index: nodes_initial.length + nodes_inner.length + "",
-        verification_key: innner_layer_vk,
         hashed_message: hashed_message,
         pub_key_x: pub_key_x,
         pub_key_y: pub_key_y,
